@@ -1,26 +1,226 @@
 @import "tailwindcss";
 
+@theme {
+  --color-void: #04080f;
+  --color-base: #070d1a;
+  --color-card: #0c1526;
+  --color-panel: #101d30;
+  --color-hover: #152035;
+  --color-border: #162032;
+  --color-border-mid: #1e3050;
+  --color-border-bright: #2a4a6e;
+
+  --color-erp-blue: #3b82f6;
+  --color-erp-blue-dim: #1e4a8f;
+  --color-erp-green: #22c55e;
+  --color-erp-green-dim: #14532d;
+  --color-erp-amber: #f59e0b;
+  --color-erp-amber-dim: #78350f;
+  --color-erp-red: #ef4444;
+  --color-erp-red-dim: #7f1d1d;
+  --color-erp-purple: #a855f7;
+
+  --color-txt-primary: #e2eaf5;
+  --color-txt-secondary: #7a9abf;
+  --color-txt-muted: #3d5a7a;
+
+  --font-mono: var(--font-ibm-mono), 'IBM Plex Mono', monospace;
+  --font-display: var(--font-barlow), 'Barlow', system-ui, sans-serif;
+  --font-sans: var(--font-barlow), 'Barlow', system-ui, sans-serif;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+}
+
+/* ── CSS custom properties ─────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg-void: #04080f;
+  --bg-base: #070d1a;
+  --bg-card: #0c1526;
+  --bg-panel: #101d30;
+  --bg-hover: #152035;
+  --border-dim: #162032;
+  --border-mid: #1e3050;
+  --border-bright: #2a4a6e;
+  --txt-primary: #e2eaf5;
+  --txt-secondary: #7a9abf;
+  --txt-muted: #3d5a7a;
+  --accent-blue: #3b82f6;
+  --accent-green: #22c55e;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+  --accent-purple: #a855f7;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ── Reset & base ───────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  height: 100%;
+  background-color: var(--bg-base);
+  color: var(--txt-primary);
+  font-family: var(--font-barlow, 'Barlow'), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Grid texture overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(59, 130, 246, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.018) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-void); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-blue); }
+
+/* ── Typography ─────────────────────────────────────────────────── */
+.num {
+  font-family: var(--font-ibm-mono, 'IBM Plex Mono'), monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.mono {
+  font-family: var(--font-ibm-mono, 'IBM Plex Mono'), monospace;
+}
+
+.label {
+  font-family: var(--font-ibm-mono, 'IBM Plex Mono'), monospace;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--txt-muted);
+}
+
+/* ── Card ───────────────────────────────────────────────────────── */
+.erp-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  position: relative;
+  overflow: hidden;
+}
+
+.erp-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.35), transparent);
+  pointer-events: none;
+}
+
+/* ── Table ──────────────────────────────────────────────────────── */
+.erp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.erp-table th {
+  padding: 7px 12px;
+  text-align: left;
+  font-family: var(--font-ibm-mono, 'IBM Plex Mono'), monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--txt-muted);
+  border-bottom: 1px solid var(--border-dim);
+  white-space: nowrap;
+  background: var(--bg-panel);
+}
+
+.erp-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-dim);
+  color: var(--txt-primary);
+  vertical-align: middle;
+}
+
+.erp-table tr:last-child td { border-bottom: none; }
+.erp-table tbody tr:hover td { background: var(--bg-hover); }
+
+/* ── Animations ─────────────────────────────────────────────────── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+@keyframes blink-cursor {
+  50% { opacity: 0; }
+}
+
+.anim-fade-up {
+  animation: fade-up 0.35s ease both;
+}
+
+.anim-delay-1 { animation-delay: 60ms; }
+.anim-delay-2 { animation-delay: 120ms; }
+.anim-delay-3 { animation-delay: 180ms; }
+.anim-delay-4 { animation-delay: 240ms; }
+.anim-delay-5 { animation-delay: 300ms; }
+.anim-delay-6 { animation-delay: 360ms; }
+
+/* ── Status glow ────────────────────────────────────────────────── */
+.glow-green { box-shadow: 0 0 0 1px rgba(34,197,94,0.4), 0 0 10px rgba(34,197,94,0.15); }
+.glow-blue  { box-shadow: 0 0 0 1px rgba(59,130,246,0.4), 0 0 10px rgba(59,130,246,0.15); }
+.glow-amber { box-shadow: 0 0 0 1px rgba(245,158,11,0.4), 0 0 10px rgba(245,158,11,0.15); }
+.glow-red   { box-shadow: 0 0 0 1px rgba(239,68,68,0.4),  0 0 10px rgba(239,68,68,0.15); }
+
+/* Active agent pulse */
+.active-pulse {
+  position: relative;
+}
+.active-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--accent-green);
+  animation: pulse-ring 2s cubic-bezier(0.4,0,0.6,1) infinite;
+}
+
+/* Hover-capable block elements */
+.hover-row:hover { background: var(--bg-hover); }
+.hover-card:hover { background: var(--bg-hover); }
+
+/* Progress bar */
+.erp-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-dim);
+  overflow: hidden;
+}
+
+.erp-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
 }
