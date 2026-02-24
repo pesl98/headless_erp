@@ -6,4 +6,10 @@ const SUPABASE_ANON_KEY =
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: false },
+  global: {
+    // Tell Next.js never to cache Supabase fetches — every server render
+    // gets a fresh response directly from the database.
+    fetch: (url: RequestInfo | URL, options: RequestInit = {}) =>
+      fetch(url, { ...options, cache: 'no-store' }),
+  },
 })
