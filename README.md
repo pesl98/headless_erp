@@ -22,8 +22,26 @@ Unlike legacy systems where business logic is scattered across frontend or backe
 * A recursive PL/pgSQL engine evaluates these constraints during every transaction.
 * If an AI agent attempts an action that violates these mathematical rules, the database triggers a `RAISE EXCEPTION`, forcing the agent to self-correct.
 
-[Image of First-Order Logic Predicate Calculus tree for database constraints]
+
 
 ### C. Active Orchestration Engine
 Supabase transforms the passive database into an active participant:
-*
+* **pg_cron & pg_net:** Periodic heartbeats and asynchronous execution loops.
+* **pgmq:** Durable message queuing for multi-agent task routing.
+* **Row-Level Security (RLS):** Cryptographic isolation ensuring agents can only access data within their specific domain.
+
+## 3. Why This Changes Everything
+The traditional junior role in consultancy and IT—focused on low-complexity tasks like data entry, basic reporting, and routine analysis—is now economically obsolete.
+**This system automates the architecture itself:**
+1. **Zero UI:** Eliminates human latency and manual entry errors.
+2. **Self-Healing:** Agents debug their own logic against rigid database constraints.
+3. **Provable Compliance:** Governance is enforced by mathematical logic, not PDF manuals.
+
+## 4. Roadmap
+- [ ] Implementation of the `agent_constraints` table (Predicate Logic Engine).
+- [ ] Setup of `pgvector` for Semantic Memory storage.
+- [ ] Integration of the Model Context Protocol (MCP) Tool Registry.
+- [ ] Prototype for the first 'Autonomous Buyer Agent'.
+
+---
+*Disclaimer: This project is 'Cooked' for anyone still betting on the billable-hour junior model.*
