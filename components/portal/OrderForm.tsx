@@ -435,7 +435,7 @@ export function OrderForm({ products }: { products: Product[] }) {
             </button>
 
             <div style={{ textAlign: 'center', marginTop: 10, fontSize: '0.68rem', color: 'var(--txt-muted)', fontFamily: 'var(--font-ibm-mono, monospace)' }}>
-              ROUTED TO SALES AGENT · APEX
+              ROUTED TO · SALES AGENT
             </div>
           </div>
         </div>

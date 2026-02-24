@@ -119,7 +119,7 @@ export default async function PortalPage() {
           >
             {[
               { label: 'PRODUCTS AVAILABLE', value: products.length.toString() },
-              { label: 'SALES AGENT',         value: 'APEX' },
+              { label: 'SALES AGENT',         value: 'SALES AGENT' },
               { label: 'RESPONSE TIME',       value: '< 60s' },
               { label: 'CURRENCIES',          value: 'EUR' },
             ].map(({ label, value }) => (
