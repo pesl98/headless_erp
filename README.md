@@ -4,6 +4,8 @@
 
 <img width="1360" height="742" alt="image" src="https://github.com/user-attachments/assets/40ba202e-564d-4baf-a34b-e19602e537ce" />
 
+<img width="1918" height="952" alt="image" src="https://github.com/user-attachments/assets/c774b3d1-6436-4b5a-a305-f92f0af8b26d" />
+
 
 ## 1. The Vision
 This is not a traditional ERP system. This is an **Autonomous Enterprise Operating System**. Instead of a rigid software monolith where humans manually enter data, this architecture treats the database (PostgreSQL/Supabase) as both the sole 'Source of Truth' and the 'Execution Engine'.
