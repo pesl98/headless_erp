@@ -12,6 +12,7 @@ import {
   ListOrdered,
   Cpu,
   Circle,
+  ExternalLink,
 } from 'lucide-react'
 
 const NAV = [
@@ -26,6 +27,9 @@ const NAV = [
 
 export function Sidebar() {
   const pathname = usePathname()
+
+  // Portal is full-width — hide sidebar there
+  if (pathname === '/portal') return null
 
   return (
     <aside
@@ -201,6 +205,40 @@ export function Sidebar() {
           )
         })}
       </nav>
+
+      {/* External Portal link */}
+      <div style={{ padding: '8px 8px 4px', borderTop: '1px solid var(--border-dim)' }}>
+        <div style={{ padding: '6px 16px 4px' }}>
+          <span className="label" style={{ fontSize: '0.58rem' }}>EXTERNAL</span>
+        </div>
+        <Link
+          href="/portal"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '8px 10px',
+            borderRadius: 5,
+            marginBottom: 2,
+            textDecoration: 'none',
+            border: '1px solid transparent',
+            background: pathname === '/portal' ? 'rgba(34,197,94,0.1)' : 'transparent',
+          }}
+        >
+          <ExternalLink size={15} color="#22c55e" style={{ flexShrink: 0 }} />
+          <span
+            style={{
+              fontFamily: 'var(--font-barlow, sans-serif)',
+              fontSize: '0.8125rem',
+              fontWeight: 400,
+              color: '#22c55e',
+              letterSpacing: '0.01em',
+            }}
+          >
+            Customer Portal
+          </span>
+        </Link>
+      </div>
 
       {/* Footer */}
       <div
