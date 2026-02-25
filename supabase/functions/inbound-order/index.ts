@@ -137,7 +137,7 @@ Deno.serve(async (req: Request) => {
         order_status: 'draft',
         total_invoice_value: estimated_value,
         discount_percent: 0,
-        order_creation_date: new Date().toISOString().split('T')[0],
+        // order_creation_date omitted — defaults to now() in DB (timestamp with time zone)
       })
       .select('sales_order_id')
       .single();
@@ -145,12 +145,12 @@ Deno.serve(async (req: Request) => {
     if (orderError) throw orderError;
 
     // ── Create sales order line items ────────────────────────────────
+    // Note: line_total is a GENERATED column (quantity * unit_price) — do not insert it
     const lineItems = resolvedItems.map((item) => ({
       sales_order_id: salesOrder.sales_order_id,
       product_id: item.product_id,
       quantity: item.quantity,
       unit_price: item.unit_price,
-      line_total: item.line_total,
     }));
 
     const { error: itemsError } = await supabase
@@ -208,7 +208,14 @@ Deno.serve(async (req: Request) => {
     );
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
+    // PostgrestError from Supabase is a plain object (not instanceof Error).
+    // Extract .message from either type so the caller sees the real reason.
+    const message =
+      err instanceof Error
+        ? err.message
+        : typeof err === 'object' && err !== null && 'message' in err
+        ? String((err as { message: unknown }).message)
+        : JSON.stringify(err);
     console.error('inbound-order error:', message);
     return new Response(
       JSON.stringify({ error: 'Internal server error', detail: message }),
