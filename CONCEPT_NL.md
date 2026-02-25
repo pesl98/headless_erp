@@ -438,6 +438,28 @@ KNOWN GOTCHAS — learn from these
    Alternatively, modify the trigger to only fire when all entries for a
    transaction are present (check count vs expected).
 
+
+
+# Expansion Module: Autonomous Strategy & Market Intelligence
+
+**Objective**: Implement a 'Chief Strategy Officer' (CSO) Agent that bridges external market data with internal ERP execution.
+
+**Architectural Requirements**:
+1. **Market Signal Table**: Create `erp_market_intelligence` to store external trends, competitor pricing, and demand forecasts.
+2. **The CSO Agent**:
+   - **Role**: `chief_strategy_officer`.
+   - **Tool Access**: Must have a tool `fetch_market_trends(query)` (connected to Grok/Perplexity API) and `update_product_strategy(sku, new_price, reorder_logic)`.
+3. **Autonomous Loop**:
+   - The CSO Agent is triggered weekly via `pg_cron`.
+   - It compares `erp_inventory` and `erp_sales_orders` performance against external trends.
+   - It emits `TASK_EVENTS` to the `procurement_agent` or `sales_agent` to adjust the business trajectory.
+
+**Safety Constraint (The Golden Rule)**:
+- The CSO cannot authorize a budget increase of >15% without a `HUMAN_REVIEW` event being inserted into the task queue for the Telegram Admin.
+- Every strategic shift must be logged in `erp_authorization_logs` with the 'Reason' field containing the market data snippet that triggered the decision.
+
+**Implementation Goal**: 
+Transition from a reactive ERP (responding to orders) to a proactive ERP (anticipating market shifts).
 8. erp_task_events.status check constraint:
    CHECK (status IN ('pending', 'processing', 'completed', 'failed'))
    Using 'processed' silently fails the UPDATE (no error, just 0 rows updated).
