@@ -1,61 +1,26 @@
 # Headless ERP — Next Steps & Implementation Roadmap
 
-> **Current state:** Database schema complete · Operator Console live · Customer Portal live · `inbound-order` Edge Function deployed
-> **What's missing:** The agent runtime — the layer that actually invokes LLMs to process task events
+> **Current state:** Sales agent live · Event-dispatch trigger live · Telegram bot live · Operator Console live · Customer Portal live
+> **What's done:** The full order pipeline from Telegram/Portal → event INSERT → dispatch trigger → sales-agent → confirmed order runs in under 1 second
+> **What's next:** Finance agent, then predicate calculus evaluator, then procurement
 
 ---
 
-## Priority 1 — Agent Runtime (Core Gap)
+## ✅ Completed (as of 2026-02-25)
 
-These are the items that make the system genuinely "headless". Without them, the queue fills up but nothing is processed automatically.
-
-### 1.1 Agent Invocation Edge Function
-The central router that picks up `pending` task events and dispatches them to the correct agent.
-
-**What to build:**
-- Edge Function `agent-router` triggered by a `pg_cron` job every 60 seconds (or via `pg_net` webhook on INSERT into `erp_task_events`)
-- Reads `pending` events ordered by priority DESC
-- Maps `event_type` → `target_agent` role → calls the relevant agent Edge Function
-- Sets `status = 'processing'` before handing off
-- Sets `status = 'completed'` or `'failed'` + `processed_at` after response
-
-```
-pg_cron (every 60s)
-  → agent-router Edge Function
-    → reads pending events
-    → calls sales-agent / finance-agent / etc.
-    → updates status
-```
+| Item | Notes |
+|------|-------|
+| `inbound-order` Edge Function | Intake for all channels — creates draft order + task event |
+| `sales-agent` Edge Function v3 | Processes `ORDER_NEGOTIATION`, confirms orders, applies tier discounts, updates inventory |
+| `concierge-bot` Edge Function | Claude Opus 4.6 Telegram bot — agentic loop with 5 DB tools |
+| `erp_dispatch_on_task_insert` trigger | AFTER INSERT on `erp_task_events` — calls `net.http_post` immediately (~1s end-to-end) |
+| pg_cron fallback (every 5 min) | Ensures no event is permanently stuck if the dispatch call fails |
+| Credit limit trigger (draft-aware) | Drafts skip credit check; confirmed orders are enforced |
+| Cascade confirm trigger | `draft → confirmed` deducts inventory, emits `INVOICE_CUSTOMER` |
 
 ---
 
-### 1.2 Sales Agent Edge Function (`sales-agent`)
-Processes `ORDER_NEGOTIATION` events.
-
-**What to build:**
-- Reads the draft `erp_sales_orders` record from the event payload (`sales_order_id`)
-- Builds context: customer tier, credit balance, order value, items
-- Calls Claude API with the agent's `system_prompt` + relevant skills
-- LLM decides: approve as-is, apply tier discount, or flag for review
-- Calls `confirm_sales_order` plpgsql function (or direct Supabase update) to move status → `'confirmed'`
-- The cascade trigger then: deducts inventory + emits `INVOICE_CUSTOMER` event
-
-**Claude API call structure:**
-```typescript
-const response = await anthropic.messages.create({
-  model: 'claude-opus-4-5',
-  max_tokens: 1024,
-  system: agent.system_prompt,
-  messages: [
-    { role: 'user', content: JSON.stringify(taskEvent.payload) }
-  ],
-  tools: [confirmSalesOrderTool, postJournalEntryTool]
-})
-```
-
----
-
-### 1.3 Finance Agent Edge Function (`finance-agent`)
+## Priority 1 — Finance Agent (`finance-agent`)
 Processes `INVOICE_CUSTOMER` and `BANK_RECONCILIATION` events.
 
 **What to build:**
@@ -67,7 +32,13 @@ Processes `INVOICE_CUSTOMER` and `BANK_RECONCILIATION` events.
 
 ---
 
-### 1.4 Procurement Agent Edge Function (`procurement-agent`)
+## Priority 2 — Predicate Calculus Evaluator
+
+See `ARCHITECTURE.md §10 Priority 2` for full specification. The short version: replace the three hardcoded constraint trigger functions with a single generic evaluator that reads `erp_agent_constraints.logic_ast` at transaction time. Rules become data. Changing a business rule requires an UPDATE, not a code deploy.
+
+---
+
+## Priority 3 — Procurement Agent (`procurement-agent`)
 Processes `REORDER_TRIGGERED` events.
 
 **What to build:**
@@ -79,7 +50,7 @@ Processes `REORDER_TRIGGERED` events.
 
 ---
 
-### 1.5 HR/Payroll Agent Edge Function (`hr-payroll-agent`)
+## Priority 4 — HR/Payroll Agent (`hr-payroll-agent`)
 Processes `PAYROLL_RUN` events (triggered by pg_cron on 25th of each month).
 
 **What to build:**
@@ -91,7 +62,7 @@ Processes `PAYROLL_RUN` events (triggered by pg_cron on 25th of each month).
 
 ---
 
-## Priority 2 — MCP Tool Implementations
+## Priority 5 — MCP Tool Implementations (plpgsql functions)
 
 The tools are registered in `erp_mcp_tools` but the actual plpgsql functions behind them haven't been created. Each tool needs a corresponding PostgreSQL function.
 
@@ -135,7 +106,7 @@ CREATE OR REPLACE FUNCTION confirm_sales_order(
 
 ---
 
-## Priority 3 — Predicate Calculus Engine
+## Priority 6 — Predicate Calculus Engine (full evaluator)
 
 The constraints are stored as JSONB ASTs but the trigger that **evaluates** them hasn't been implemented.
 
@@ -153,7 +124,7 @@ This single trigger function, attached to the relevant tables, replaces the hard
 
 ---
 
-## Priority 4 — Semantic Memory Pipeline
+## Priority 7 — Semantic Memory Pipeline
 
 ### 4.1 Memory write — after each agent action
 After every successful agent invocation, write a summary to `erp_agent_memory`:
@@ -179,7 +150,7 @@ LIMIT 5;
 
 ---
 
-## Priority 5 — Additional External Triggers
+## Priority 8 — Additional External Ingress Channels
 
 ### 5.1 Supplier Portal
 Mirror of the Customer Portal — suppliers can submit invoices, delivery confirmations, or price updates. Triggers `GOODS_RECEIVED` or `SUPPLIER_INVOICE` task events → Procurement agent processes.
@@ -201,7 +172,7 @@ Mirror of the Customer Portal — suppliers can submit invoices, delivery confir
 
 ---
 
-## Priority 6 — Operator Console Enhancements
+## Priority 9 — Operator Console Enhancements
 
 ### 6.1 Order Detail Drawer
 Click a sales order row → slide-in panel showing:
@@ -238,7 +209,7 @@ Add a Recharts line/bar chart to `/finance` showing:
 
 ---
 
-## Priority 7 — Security & Production Hardening
+## Priority 10 — Security & Production Hardening
 
 ### 7.1 Row Level Security (RLS)
 Currently all tables are open (no RLS). Before going to production:
@@ -280,7 +251,7 @@ Prevent abuse of the public order endpoint:
 
 ---
 
-## Priority 8 — Deployment
+## Priority 11 — Deployment
 
 ### 8.1 Deploy to Vercel
 ```bash
@@ -311,21 +282,27 @@ SELECT cron.schedule('inventory-check', '*/30 * * * *',
 
 | Layer | Status | Notes |
 |-------|--------|-------|
-| Database schema (24 tables) | ✅ Done | All tables, triggers, constraints, seed data |
-| Double-entry trigger | ✅ Done | Σ(DR) = Σ(CR) enforced |
-| Refrigeration constraint trigger | ✅ Done | Blocks cold products → wrong warehouse |
-| Credit limit trigger | ✅ Done | Blocks orders exceeding customer limit |
-| Cascade trigger (confirm → deduct) | ✅ Done | Inventory deduction + INVOICE_CUSTOMER event |
+| Database schema (26 tables) | ✅ Done | All domains: sales, procurement, inventory, finance, HR, agents |
+| Double-entry trigger | ✅ Done | Σ(DR) = Σ(CR) enforced per transaction |
+| Refrigeration constraint trigger | ✅ Done | Blocks cold products → ambient warehouse |
+| Credit limit trigger (draft-aware) | ✅ Done | Drafts skip check; confirmed orders enforced |
+| Cascade confirm trigger | ✅ Done | Inventory deduction + INVOICE_CUSTOMER event on confirm |
+| Event-dispatch trigger | ✅ Done | `net.http_post` fires to target agent on every INSERT |
+| pg_cron fallback scheduler | ✅ Done | 5-minute sweep ensures no event is permanently stuck |
+| `sales-agent` v3 | ✅ Done | ~1s end-to-end, tier discounts, credit checks |
+| `concierge-bot` | ✅ Done | Claude Opus 4.6, Telegram webhook, persistent session memory |
+| `inbound-order` | ✅ Done | Handles portal, Telegram, and OpenClaw submissions |
 | Operator Console (7 pages) | ✅ Done | Dashboard, Agents, Finance, Inventory, Sales, HR, Queue |
-| Customer Portal | ✅ Done | `/portal` page + `inbound-order` Edge Function |
-| Draft sales order on portal submit | ✅ Done | Auto-creates draft order + task event |
-| Agent runtime (LLM invocations) | ❌ Missing | **Priority 1** — core gap |
-| MCP plpgsql tool functions | ❌ Missing | **Priority 2** — needed by agent runtime |
-| Predicate calculus evaluator | ❌ Missing | **Priority 3** — currently hardcoded triggers |
-| Semantic memory pipeline | ❌ Missing | **Priority 4** — pgvector read/write in agent loop |
-| Supplier portal | ❌ Missing | Priority 5 |
-| Bank feed webhook | ❌ Missing | Priority 5 |
-| RLS policies | ❌ Missing | **Priority 7** — needed before production |
-| Vercel deployment | ❌ Missing | Priority 8 |
-| Realtime queue updates | ❌ Missing | Priority 6.3 — nice to have |
-| Authorization log viewer | ❌ Missing | Priority 6.2 — nice to have |
+| Customer Portal | ✅ Done | Public order form + live product catalogue |
+| OpenClaw context | ✅ Done | `OPENCLAW_ERP_CONTEXT.md` for internal operator sessions |
+| `finance-agent` | ❌ Next | `INVOICE_CUSTOMER` queue filling — **Priority 1** |
+| Predicate calculus evaluator | ❌ Planned | Replace hardcoded triggers — **Priority 2** |
+| `procurement-agent` | ❌ Planned | `REORDER_TRIGGERED` support — Priority 3 |
+| `hr-payroll-agent` | ❌ Planned | pg_cron schedule ready, agent missing — Priority 4 |
+| MCP plpgsql tool functions | ❌ Planned | `post_journal_entry`, `create_purchase_order` etc — Priority 5 |
+| Semantic memory pipeline | ❌ Planned | pgvector read/write per agent invocation — Priority 7 |
+| Row-Level Security | ⚠️ Required | Needed before production traffic — Priority 10 |
+| Vercel deployment | ❌ Planned | Priority 11 |
+| Realtime Console updates | ❌ Nice to have | Replace ISR with Supabase Realtime — Priority 9 |
+| Authorization log viewer | ❌ Nice to have | Table exists, not surfaced in UI — Priority 9 |
+| Bank feed ingest | ❌ Planned | External bank API integration — Priority 8 |

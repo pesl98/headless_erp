@@ -32,6 +32,16 @@ interface ProcessResult {
   final_value?: number;
 }
 
+// ── Extract error message from unknown catch value ────────────────────────────
+
+function extractMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) {
+    return String((err as { message: unknown }).message);
+  }
+  return JSON.stringify(err);
+}
+
 // ── Discount by customer tier ─────────────────────────────────────────────────
 
 function getDiscount(tier: string): number {
@@ -95,7 +105,7 @@ Deno.serve(async (req: Request) => {
       if (result.status === "confirmed") {
         await supabase
           .from("erp_task_events")
-          .update({ status: "processed", processed_at: new Date().toISOString() })
+          .update({ status: "completed", processed_at: new Date().toISOString() })
           .eq("event_id", event.event_id);
       } else if (result.status === "failed") {
         await supabase
@@ -131,12 +141,7 @@ Deno.serve(async (req: Request) => {
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (err: unknown) {
-    const message =
-      err instanceof Error
-        ? err.message
-        : typeof err === "object" && err !== null && "message" in err
-        ? String((err as { message: unknown }).message)
-        : JSON.stringify(err);
+    const message = extractMessage(err);
     console.error("sales-agent error:", message);
     return new Response(
       JSON.stringify({ success: false, error: message }),
@@ -257,12 +262,7 @@ async function processOrderEvent(
         event_id: event.event_id,
         sales_order_id,
         status: "failed",
-        reason:
-          confirmError instanceof Error
-            ? confirmError.message
-            : typeof confirmError === "object" && "message" in confirmError
-            ? String((confirmError as { message: unknown }).message)
-            : JSON.stringify(confirmError),
+        reason: extractMessage(confirmError),
       };
     }
 
@@ -291,17 +291,11 @@ async function processOrderEvent(
       final_value: finalValue,
     };
   } catch (err: unknown) {
-    const message =
-      err instanceof Error
-        ? err.message
-        : typeof err === "object" && err !== null && "message" in err
-        ? String((err as { message: unknown }).message)
-        : JSON.stringify(err);
     return {
       event_id: event.event_id,
       sales_order_id,
       status: "failed",
-      reason: message,
+      reason: extractMessage(err),
     };
   }
 }

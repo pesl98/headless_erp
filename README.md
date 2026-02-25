@@ -47,9 +47,10 @@ The traditional junior role in consultancy and IT—focused on low-complexity ta
 This is a working system, not a prototype. The following is live on Supabase:
 
 ### Infrastructure
-- **PostgreSQL schema** — 14 ERP tables (products, customers, inventory, sales orders, purchase orders, payroll, HR, finance, agent registry, task queue)
-- **Database triggers** — credit limit enforcement, inventory deduction on order confirm, double-entry bookkeeping, refrigeration constraint
-- **pg_cron** — automated job scheduler running the sales agent every 5 minutes
+- **PostgreSQL schema** — 26 ERP tables across sales, procurement, inventory, finance, HR, and agent domains
+- **Database triggers** — credit limit enforcement, inventory deduction on order confirm, double-entry bookkeeping, refrigeration constraint, real-time event dispatch via `net.http_post`
+- **pg_cron** — automated job scheduler (sales agent every 5 minutes, payroll on 25th of month)
+- **Event-Driven Ingress** — every external signal enters via `erp_task_events` INSERT, which immediately wakes the target agent
 
 ### Agent Layer
 | Agent | Status | Role |
@@ -67,33 +68,39 @@ This is a working system, not a prototype. The following is live on Supabase:
 - **Telegram Bot** (Concierge Agent) — Claude Opus 4.6 powered chatbot for customers to place orders conversationally
 - **OpenClaw** — local AI assistant with direct Supabase access for internal operators
 
-### Order Pipeline (live end-to-end)
+### Order Pipeline (live end-to-end, ~1 second)
 ```
 Customer (Telegram or Portal)
-    -> inbound-order Edge Function   (creates draft sales order + task event)
-    -> sales-agent Edge Function     (confirms order, applies discount, triggers inventory deduction)
-    -> finance_agent task event      (queued — awaiting implementation)
+    -> inbound-order Edge Function        (creates draft sales order + task event INSERT)
+    -> erp_dispatch_on_task_insert        (DB trigger: net.http_post fires immediately)
+    -> sales-agent Edge Function v3       (confirms order, applies tier discount, deducts inventory)
+    -> erp_sales_order_confirmed_trigger  (DB trigger: emits INVOICE_CUSTOMER event)
+    -> finance_agent task event           (queued — awaiting finance-agent implementation)
 ```
 
 ### Key Design Documents
-- [`DESIGN.md`](./DESIGN.md) — full system architecture, schema, and agent design
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — full system architecture, signal flow, trigger catalogue, open features
 - [`TELEGRAM_INTEGRATION.md`](./TELEGRAM_INTEGRATION.md) — Telegram bot and OpenClaw integration guide
 - [`OPENCLAW_ERP_CONTEXT.md`](./OPENCLAW_ERP_CONTEXT.md) — context file for OpenClaw sessions
 - [`NEXT_STEPS.md`](./NEXT_STEPS.md) — implementation roadmap
 
 ## 5. Roadmap
-- [x] ERP schema (14 tables, triggers, pg_cron)
-- [x] Sales agent (automated order review and confirmation)
+- [x] ERP schema (26 tables, all domains)
+- [x] Database triggers (credit limit, refrigeration, double-entry, cascade confirm, event dispatch)
+- [x] Event-dispatch trigger (`erp_dispatch_on_task_insert` via `net.http_post`)
+- [x] pg_cron fallback scheduler
+- [x] Sales agent v3 (order confirmation in ~1 second end-to-end)
 - [x] Telegram Concierge Bot (Claude Opus 4.6 agentic loop)
-- [x] Operator console (Next.js, live dashboards)
+- [x] Operator console (Next.js, 7 live dashboards)
 - [x] Customer portal (public order form)
 - [x] OpenClaw integration context
-- [ ] Finance agent (invoicing, journal entries)
+- [ ] Finance agent (invoicing, double-entry journal posting)
+- [ ] Predicate calculus evaluator (replace hardcoded triggers with JSONB AST engine)
 - [ ] Procurement agent (auto purchase orders on low stock)
 - [ ] Inventory watcher (scheduled stock audits)
-- [ ] HR/Payroll agent (payroll runs, timesheet processing)
-- [ ] Agent constraint engine (predicate logic rules in JSONB)
-- [ ] pgvector semantic memory for agent context
+- [ ] HR/Payroll agent (payroll runs, timesheet approval)
+- [ ] Semantic memory pipeline (pgvector read/write per agent invocation)
+- [ ] Row-Level Security (required before production)
 
 ---
 *Disclaimer: This project is 'Cooked' for anyone still betting on the billable-hour junior model.*
