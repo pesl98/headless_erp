@@ -42,11 +42,58 @@ The traditional junior role in consultancy and IT—focused on low-complexity ta
 2. **Self-Healing:** Agents debug their own logic against rigid database constraints.
 3. **Provable Compliance:** Governance is enforced by mathematical logic, not PDF manuals.
 
-## 4. Roadmap
-- [ ] Implementation of the `agent_constraints` table (Predicate Logic Engine).
-- [ ] Setup of `pgvector` for Semantic Memory storage.
-- [ ] Integration of the Model Context Protocol (MCP) Tool Registry.
-- [ ] Prototype for the first 'Autonomous Buyer Agent'.
+## 4. What Is Actually Built
+
+This is a working system, not a prototype. The following is live on Supabase:
+
+### Infrastructure
+- **PostgreSQL schema** — 14 ERP tables (products, customers, inventory, sales orders, purchase orders, payroll, HR, finance, agent registry, task queue)
+- **Database triggers** — credit limit enforcement, inventory deduction on order confirm, double-entry bookkeeping, refrigeration constraint
+- **pg_cron** — automated job scheduler running the sales agent every 5 minutes
+
+### Agent Layer
+| Agent | Status | Role |
+|-------|--------|------|
+| `sales_agent` | ✅ Active (automated) | Reviews and confirms draft orders, applies tier discounts |
+| `concierge_agent` | ✅ Active (Telegram bot) | Takes orders from external users via Claude Opus |
+| `finance_agent` | 🔜 Next | Invoicing and journal entries |
+| `procurement_agent` | 🔜 Planned | Purchase orders when stock runs low |
+| `inventory_watcher` | 🔜 Planned | Monitors stock levels and triggers reorders |
+| `hr_payroll_agent` | 🔜 Planned | Payroll runs and timesheet approval |
+
+### External Interfaces
+- **Operator Console** — Next.js app with live dashboards for queue, sales, inventory, finance, HR
+- **Customer Portal** — public order submission form with live product catalogue
+- **Telegram Bot** (Concierge Agent) — Claude Opus 4.6 powered chatbot for customers to place orders conversationally
+- **OpenClaw** — local AI assistant with direct Supabase access for internal operators
+
+### Order Pipeline (live end-to-end)
+```
+Customer (Telegram or Portal)
+    -> inbound-order Edge Function   (creates draft sales order + task event)
+    -> sales-agent Edge Function     (confirms order, applies discount, triggers inventory deduction)
+    -> finance_agent task event      (queued — awaiting implementation)
+```
+
+### Key Design Documents
+- [`DESIGN.md`](./DESIGN.md) — full system architecture, schema, and agent design
+- [`TELEGRAM_INTEGRATION.md`](./TELEGRAM_INTEGRATION.md) — Telegram bot and OpenClaw integration guide
+- [`OPENCLAW_ERP_CONTEXT.md`](./OPENCLAW_ERP_CONTEXT.md) — context file for OpenClaw sessions
+- [`NEXT_STEPS.md`](./NEXT_STEPS.md) — implementation roadmap
+
+## 5. Roadmap
+- [x] ERP schema (14 tables, triggers, pg_cron)
+- [x] Sales agent (automated order review and confirmation)
+- [x] Telegram Concierge Bot (Claude Opus 4.6 agentic loop)
+- [x] Operator console (Next.js, live dashboards)
+- [x] Customer portal (public order form)
+- [x] OpenClaw integration context
+- [ ] Finance agent (invoicing, journal entries)
+- [ ] Procurement agent (auto purchase orders on low stock)
+- [ ] Inventory watcher (scheduled stock audits)
+- [ ] HR/Payroll agent (payroll runs, timesheet processing)
+- [ ] Agent constraint engine (predicate logic rules in JSONB)
+- [ ] pgvector semantic memory for agent context
 
 ---
 *Disclaimer: This project is 'Cooked' for anyone still betting on the billable-hour junior model.*
