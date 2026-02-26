@@ -57,7 +57,7 @@ This is a working system, not a prototype. The following is live on Supabase:
 |-------|--------|------|
 | `sales_agent` | ✅ Active (automated) | Reviews and confirms draft orders, applies tier discounts |
 | `concierge_agent` | ✅ Active (Telegram bot) | Takes orders from external users via Claude Opus |
-| `finance_agent` | 🔜 Next | Invoicing and journal entries |
+| `finance_agent` | ✅ Active (automated) | Posts double-entry journals, advances orders to invoiced |
 | `procurement_agent` | 🔜 Planned | Purchase orders when stock runs low |
 | `inventory_watcher` | 🔜 Planned | Monitors stock levels and triggers reorders |
 | `hr_payroll_agent` | 🔜 Planned | Payroll runs and timesheet approval |
@@ -75,7 +75,7 @@ Customer (Telegram or Portal)
     -> erp_dispatch_on_task_insert        (DB trigger: net.http_post fires immediately)
     -> sales-agent Edge Function v3       (confirms order, applies tier discount, deducts inventory)
     -> erp_sales_order_confirmed_trigger  (DB trigger: emits INVOICE_CUSTOMER event)
-    -> finance_agent task event           (queued — awaiting finance-agent implementation)
+    -> finance-agent Edge Function        (posts DR AR / CR Revenue, advances order to invoiced)
 ```
 
 ### Key Design Documents
@@ -94,7 +94,7 @@ Customer (Telegram or Portal)
 - [x] Operator console (Next.js, 7 live dashboards)
 - [x] Customer portal (public order form)
 - [x] OpenClaw integration context
-- [ ] Finance agent (invoicing, double-entry journal posting)
+- [x] Finance agent (invoicing, double-entry journal posting, ~4s end-to-end)
 - [ ] Predicate calculus evaluator (replace hardcoded triggers with JSONB AST engine)
 - [ ] Procurement agent (auto purchase orders on low stock)
 - [ ] Inventory watcher (scheduled stock audits)

@@ -12,23 +12,51 @@
 |------|-------|
 | `inbound-order` Edge Function | Intake for all channels — creates draft order + task event |
 | `sales-agent` Edge Function v3 | Processes `ORDER_NEGOTIATION`, confirms orders, applies tier discounts, updates inventory |
+| `finance-agent` Edge Function v2 | Processes `INVOICE_CUSTOMER`, posts DR AR / CR Revenue, advances order to `invoiced` |
 | `concierge-bot` Edge Function | Claude Opus 4.6 Telegram bot — agentic loop with 5 DB tools |
-| `erp_dispatch_on_task_insert` trigger | AFTER INSERT on `erp_task_events` — calls `net.http_post` immediately (~1s end-to-end) |
-| pg_cron fallback (every 5 min) | Ensures no event is permanently stuck if the dispatch call fails |
+| `erp_dispatch_on_task_insert` trigger | AFTER INSERT on `erp_task_events` — calls `net.http_post` immediately |
+| pg_cron fallback (every 5 min) | Sweeps for stuck events — both `sales-agent` and `finance-agent` |
 | Credit limit trigger (draft-aware) | Drafts skip credit check; confirmed orders are enforced |
 | Cascade confirm trigger | `draft → confirmed` deducts inventory, emits `INVOICE_CUSTOMER` |
+| Journal balance trigger (deferrable) | `DEFERRABLE INITIALLY DEFERRED` — validates Σ(DR)=Σ(CR) at COMMIT |
+| `post_journal_entry()` PL/pgSQL | Atomic double-entry posting function, called via `supabase.rpc()` |
 
 ---
 
-## Priority 1 — Finance Agent (`finance-agent`)
-Processes `INVOICE_CUSTOMER` and `BANK_RECONCILIATION` events.
+## ✅ Finance Agent — Done
+
+`finance-agent` v2 is live. Full pipeline verified end-to-end at ~4 seconds:
+
+```
+inbound-order → ORDER_NEGOTIATION (sales-agent ~1s) → INVOICE_CUSTOMER (finance-agent ~3s)
+                  confirmed                              invoiced + journal posted
+```
+
+Journal entries for each confirmed order:
+```
+DR 12000  Accounts Receivable   = total_invoice_value   (asset increases)
+CR 41000  Product Revenue       = total_invoice_value   (revenue increases)
+```
+Balance enforced at COMMIT by the deferrable `erp_journal_balance_check` trigger.
+
+**Still missing from finance pipeline:**
+- `BANK_RECONCILIATION` event processing (match bank transactions to AR entries)
+- Customer invoice email/PDF generation (requires external email service)
+
+---
+
+## Priority 1 — Procurement Agent (`procurement-agent`)
+
+`REORDER_TRIGGERED` events are already emitted by the cascade confirm trigger when inventory falls below `reorder_point`. Nothing processes them yet.
 
 **What to build:**
-- Receives `INVOICE_CUSTOMER` events (triggered automatically when a sales order is confirmed)
-- Calls `post_journal_entry` plpgsql function:
-  - DR Accounts Receivable / CR Product Revenue
-- Calls `send_customer_invoice` external API (PDF generation + email)
-- Processes `BANK_RECONCILIATION` events weekly — matches bank transactions to journal entries
+- Claim pending `REORDER_TRIGGERED` events
+- For each: read deficit from payload, query `erp_suppliers` ordered by `reliability_score DESC`, `lead_time_days ASC`
+- Select best supplier where `is_preferred = true`
+- Verify order value ≤ `financial_authority_limit` (agent has $50k)
+- INSERT `erp_purchase_orders` + `erp_purchase_order_items`
+- Post journal: DR Inventory Asset / CR Accounts Payable
+- Mark event `completed`
 
 ---
 
@@ -295,9 +323,11 @@ SELECT cron.schedule('inventory-check', '*/30 * * * *',
 | Operator Console (7 pages) | ✅ Done | Dashboard, Agents, Finance, Inventory, Sales, HR, Queue |
 | Customer Portal | ✅ Done | Public order form + live product catalogue |
 | OpenClaw context | ✅ Done | `OPENCLAW_ERP_CONTEXT.md` for internal operator sessions |
-| `finance-agent` | ❌ Next | `INVOICE_CUSTOMER` queue filling — **Priority 1** |
-| Predicate calculus evaluator | ❌ Planned | Replace hardcoded triggers — **Priority 2** |
-| `procurement-agent` | ❌ Planned | `REORDER_TRIGGERED` support — Priority 3 |
+| `finance-agent` v2 | ✅ Done | INVOICE_CUSTOMER → journal posted → order invoiced |
+| `post_journal_entry()` PL/pgSQL | ✅ Done | Atomic DR/CR posting with deferrable balance check |
+| Journal balance trigger (deferrable) | ✅ Done | Validates at COMMIT, not per-row |
+| Predicate calculus evaluator | ❌ Planned | Replace hardcoded triggers — Priority 2 |
+| `procurement-agent` | ❌ Next | `REORDER_TRIGGERED` support — **Priority 1** |
 | `hr-payroll-agent` | ❌ Planned | pg_cron schedule ready, agent missing — Priority 4 |
 | MCP plpgsql tool functions | ❌ Planned | `post_journal_entry`, `create_purchase_order` etc — Priority 5 |
 | Semantic memory pipeline | ❌ Planned | pgvector read/write per agent invocation — Priority 7 |
