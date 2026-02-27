@@ -84,7 +84,97 @@ Customer (Telegram or Portal)
 - [`OPENCLAW_ERP_CONTEXT.md`](./OPENCLAW_ERP_CONTEXT.md) — context file for OpenClaw sessions
 - [`NEXT_STEPS.md`](./NEXT_STEPS.md) — implementation roadmap
 
-## 5. Roadmap
+## 5. Quick Start
+
+Clone and run the full stack locally in about 10 minutes.
+
+### Prerequisites
+
+| Tool | Version | Install |
+|------|---------|---------|
+| Node.js | 18+ | [nodejs.org](https://nodejs.org) |
+| Supabase CLI | latest | `npm i -g supabase` |
+| Deno | 1.40+ | [deno.land](https://deno.land) |
+| Anthropic API key | — | [console.anthropic.com](https://console.anthropic.com) |
+| Telegram Bot Token | — | Message [@BotFather](https://t.me/BotFather) on Telegram |
+
+---
+
+### Step 1 — Clone
+
+```bash
+git clone https://github.com/pesl98/headless_erp.git
+cd headless_erp
+```
+
+### Step 2 — Create a Supabase project
+
+1. Go to [supabase.com/dashboard](https://supabase.com/dashboard) → New project
+2. Note your **Project ID**, **API URL**, and **service role key** (Settings → API)
+
+Link the CLI to your project:
+```bash
+supabase login
+supabase link --project-ref YOUR_PROJECT_ID
+```
+
+### Step 3 — Apply database migrations
+
+```bash
+supabase db push
+```
+
+This creates all 26 ERP tables, triggers, pg_cron jobs, and the `post_journal_entry` PL/pgSQL function.
+
+> **Note:** Enable the `pg_cron`, `pg_net`, and `pgmq` extensions in Supabase Dashboard → Database → Extensions before running migrations.
+
+### Step 4 — Set Edge Function secrets
+
+```bash
+supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+supabase secrets set TELEGRAM_BOT_TOKEN=your-telegram-token
+```
+
+### Step 5 — Deploy Edge Functions
+
+```bash
+supabase functions deploy inbound-order
+supabase functions deploy sales-agent
+supabase functions deploy finance-agent
+supabase functions deploy concierge-bot
+```
+
+### Step 6 — Register the Telegram webhook
+
+```bash
+curl -X POST "https://api.telegram.org/botYOUR_TOKEN/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://YOUR_PROJECT_ID.supabase.co/functions/v1/concierge-bot"}'
+```
+
+### Step 7 — Start the operator console
+
+```bash
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) — you'll see live dashboards for queue, sales, inventory, finance, and HR.
+
+### Step 8 — Smoke test
+
+Send your Telegram bot: `Hello, what products do you have?`
+
+Then verify the pipeline ran:
+```sql
+SELECT event_type, status FROM erp_task_events ORDER BY created_at DESC LIMIT 5;
+```
+
+See [`TELEGRAM_TESTING.md`](./TELEGRAM_TESTING.md) for the full test script with 10 test cases.
+
+---
+
+## 6. Roadmap
 - [x] ERP schema (26 tables, all domains)
 - [x] Database triggers (credit limit, refrigeration, double-entry, cascade confirm, event dispatch)
 - [x] Event-dispatch trigger (`erp_dispatch_on_task_insert` via `net.http_post`)
@@ -101,6 +191,20 @@ Customer (Telegram or Portal)
 - [ ] HR/Payroll agent (payroll runs, timesheet approval)
 - [ ] Semantic memory pipeline (pgvector read/write per agent invocation)
 - [ ] Row-Level Security (required before production)
+
+---
+
+## License
+
+MIT License
+
+Copyright (c) 2025 pesl98
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ---
 *Disclaimer: This project is 'Cooked' for anyone still betting on the billable-hour junior model.*
