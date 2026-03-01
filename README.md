@@ -2,9 +2,14 @@
 
 > "The GUI is a bottleneck for human slowness. This system doesn't have one."
 
-<img width="1360" height="742" alt="image" src="https://github.com/user-attachments/assets/40ba202e-564d-4baf-a34b-e19602e537ce" />
+**Operational Overview — Live agent fleet, event queue, and system metrics**
+<img width="1440" height="860" alt="Dashboard — Operational Overview" src="./docs/screenshots/dashboard.png" />
 
-<img width="1918" height="952" alt="image" src="https://github.com/user-attachments/assets/c774b3d1-6436-4b5a-a305-f92f0af8b26d" />
+**Agent Fleet Management — 7 agents with skills, authority limits, and predicate constraints**
+<img width="1440" height="860" alt="Agents — Agent Fleet Management" src="./docs/screenshots/agents.png" />
+
+**General Ledger & Accounts — Double-entry journals, chart of accounts, recent transactions**
+<img width="1440" height="860" alt="Finance — General Ledger & Accounts" src="./docs/screenshots/finance.png" />
 
 
 ## 1. The Vision
