@@ -370,7 +370,7 @@ The `/rules` page includes a **Claude-powered NL→AST compiler** (`/api/predica
 
 Claude compiles it to the JSON AST above. Multi-turn: saying *"also for platinum customers only"* composes a logical AND with the previous predicate. The compiled AST is injected directly into the editor and evaluated live.
 
-**Model:** `claude-opus-4-5` with a strict grammar-only system prompt. Field hallucinations are rejected (allowed field list is part of the system prompt).
+**Model:** `minimax/minimax-m2.5` via OpenRouter with a strict grammar-only system prompt. Temperature 0.1 for deterministic output. Field hallucinations are rejected (allowed field list is part of the system prompt).
 
 #### Roadmap to full agent integration
 

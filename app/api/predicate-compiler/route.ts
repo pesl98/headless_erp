@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 
-// ─── System prompt ─────────────────────────────────────────────────────────────
-// Describes the AST grammar completely. Small enough to fit in a system prompt
-// without burning tokens, precise enough that Claude stays on-grammar.
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const MODEL = 'minimax/minimax-m2.5'
+
+// ─── System prompt ────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are a predicate compiler for a headless ERP system.
 Your job: convert natural language business rules into a strictly typed JSON AST.
@@ -28,7 +30,7 @@ Use ">" / "<" / ">=" / "<=" for numeric comparisons only.
 |------------------|--------|---------------------------------------------|
 | invoice_amount   | number | 12000                                       |
 | order_value      | number | 8500                                        |
-| customer_tier    | string | "platinum" \| "gold" \| "silver" \| "standard" |
+| customer_tier    | string | "platinum" | "gold" | "silver" | "standard" |
 | unit_price       | number | 58.50                                       |
 | market_avg       | number | 50.00                                       |
 | credit_remaining | number | 15000                                       |
@@ -54,14 +56,13 @@ No markdown. No code fences. No explanation outside the JSON. Pure JSON only.
 ## Examples
 
 User: "reject orders where the invoice is over 10000"
-→ {"ast":{"type":"comparison","op":">","left":{"type":"field","name":"invoice_amount"},"right":{"type":"const","value":10000}},"summary":"Reject when invoice_amount exceeds 10,000."}
+{"ast":{"type":"comparison","op":">","left":{"type":"field","name":"invoice_amount"},"right":{"type":"const","value":10000}},"summary":"Reject when invoice_amount exceeds 10,000."}
 
 User: "flag if unit price is more than 10% above market average"
-→ {"ast":{"type":"comparison","op":">","left":{"type":"field","name":"unit_price"},"right":{"type":"arithmetic","op":"*","left":{"type":"field","name":"market_avg"},"right":{"type":"const","value":1.1}}},"summary":"Reject when unit_price is more than 10% above market_avg."}
+{"ast":{"type":"comparison","op":">","left":{"type":"field","name":"unit_price"},"right":{"type":"arithmetic","op":"*","left":{"type":"field","name":"market_avg"},"right":{"type":"const","value":1.1}}},"summary":"Reject when unit_price is more than 10% above market_avg."}
 
 User: "only for standard or silver customers"
-→ {"ast":{"type":"logical","op":"or","left":{"type":"comparison","op":"eq","left":{"type":"field","name":"customer_tier"},"right":{"type":"const","value":"standard"}},"right":{"type":"comparison","op":"eq","left":{"type":"field","name":"customer_tier"},"right":{"type":"const","value":"silver"}}},"summary":"Match when customer is standard or silver tier."}
-`
+{"ast":{"type":"logical","op":"or","left":{"type":"comparison","op":"eq","left":{"type":"field","name":"customer_tier"},"right":{"type":"const","value":"standard"}},"right":{"type":"comparison","op":"eq","left":{"type":"field","name":"customer_tier"},"right":{"type":"const","value":"silver"}}},"summary":"Match when customer is standard or silver tier."}`
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -83,10 +84,10 @@ interface CompilerResponse {
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.OPENROUTER_API_KEY
   if (!apiKey) {
     return NextResponse.json(
-      { error: 'ANTHROPIC_API_KEY not configured in .env.local' },
+      { error: 'OPENROUTER_API_KEY not configured in .env.local' },
       { status: 500 }
     )
   }
@@ -103,20 +104,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'messages array required' }, { status: 400 })
   }
 
-  try {
-    const client = new Anthropic({ apiKey })
+  // Build OpenAI-compatible messages array with system prompt first
+  const openRouterMessages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...messages.map((m) => ({ role: m.role, content: m.content })),
+  ]
 
-    const response = await client.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
+  try {
+    const response = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://headless-erp.vercel.app',
+        'X-Title': 'Headless ERP Predicate Compiler',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: openRouterMessages,
+        max_tokens: 1024,
+        temperature: 0.1,   // low temperature for deterministic structured output
+      }),
     })
 
-    const raw = response.content[0]?.type === 'text' ? response.content[0].text : ''
+    if (!response.ok) {
+      const err = await response.text()
+      return NextResponse.json(
+        { error: `OpenRouter error ${response.status}: ${err.slice(0, 300)}` },
+        { status: 502 }
+      )
+    }
+
+    const data = await response.json() as {
+      choices?: Array<{ message?: { content?: string } }>
+    }
+
+    const raw = data.choices?.[0]?.message?.content ?? ''
 
     // Strip any accidental markdown fences
     const cleaned = raw.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim()
@@ -126,7 +149,7 @@ export async function POST(req: NextRequest) {
       parsed = JSON.parse(cleaned) as CompilerResponse
     } catch {
       return NextResponse.json(
-        { error: `Claude returned non-JSON: ${cleaned.slice(0, 200)}` },
+        { error: `Model returned non-JSON: ${cleaned.slice(0, 200)}` },
         { status: 422 }
       )
     }

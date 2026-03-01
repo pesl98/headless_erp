@@ -165,7 +165,7 @@ Create a `.env.local` file in the project root:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_ID.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-ANTHROPIC_API_KEY=sk-ant-...        # required for /rules NL→predicate compiler
+OPENROUTER_API_KEY=sk-or-v1-...     # required for /rules NL→predicate compiler (minimax/minimax-m2.5)
 ```
 
 Then install and start:

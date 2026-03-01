@@ -891,7 +891,7 @@ export function PredicatePlayground({ skills, constraints }: Props) {
             borderRadius: 10,
           }}
         >
-          AI · claude-opus-4-5
+          minimax-m2.5 · OpenRouter
         </span>
         <ChevronDown
           size={14}
