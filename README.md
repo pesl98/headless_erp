@@ -11,6 +11,9 @@
 **General Ledger & Accounts — Double-entry journals, chart of accounts, recent transactions**
 <img width="1440" height="860" alt="Finance — General Ledger & Accounts" src="./docs/screenshots/finance.png" />
 
+**Predicate Playground — NL→AST compiler, live evaluator, grammar reference, evaluation trace**
+<img width="1440" height="860" alt="Rules — Predicate Calculus Evaluator" src="./docs/screenshots/rules.png" />
+
 
 ## 1. The Vision
 This is not a traditional ERP system. This is an **Autonomous Enterprise Operating System**. Instead of a rigid software monolith where humans manually enter data, this architecture treats the database (PostgreSQL/Supabase) as both the sole 'Source of Truth' and the 'Execution Engine'.
