@@ -615,3 +615,72 @@ No architectural change required — this is purely a frontend concern.
 | Authorization log viewer | 🔜 Nice to have | `erp_authorization_logs` populated, not surfaced in UI |
 | Bank feed ingest | 🔜 Planned | Requires external bank API integration |
 | Vercel production deploy | 🔜 Planned | Env vars, custom domain, rate limiting |
+| **Minimum Viable Autonomous Company** | 🎯 North Star | All agents live, all SOPs enforced, human intervenes on exceptions only |
+
+---
+
+## 12. North Star — Minimum Viable Autonomous Company (MVAC)
+
+> *"A company that operates itself. Humans set policy. Agents execute. The database is the contract."*
+
+### What it means
+
+An MVAC is the logical endpoint of this architecture: a legal business entity where **every repeatable operational decision is made by an agent**, constrained by SOPs stored in the database, audited in `erp_authorization_logs`, and escalated to a human only when a predicate fails or a threshold is breached.
+
+No one monitors dashboards waiting for work. The system self-directs. The operator is an **exception handler**, not an operator.
+
+---
+
+### The Five Criteria
+
+| # | Criterion | Current state | Gap |
+|---|-----------|--------------|-----|
+| 1 | **Self-selling** — Inbound leads converted to confirmed orders without human touch | ✅ concierge-bot + sales-agent pipeline live | — |
+| 2 | **Self-sourcing** — Reorder triggers fire automatically when stock hits reorder point | 🔜 `procurement-agent` schema ready | Deploy procurement-agent |
+| 3 | **Self-accounting** — Every transaction double-entry posted, P&L available in real time | ✅ finance-agent live, GL complete | — |
+| 4 | **Self-governing** — Every agent action is SOP-gated, logged, and auditable | ✅ Skill Injection Layer 2 live | Add predicate calculus evaluator |
+| 5 | **Self-correcting** — Agents detect anomalies and adjust without human instruction | 🔜 Requires episodic memory (Layer 3) + feedback loop | Build Layer 3 |
+
+---
+
+### The Remaining Build List (ordered)
+
+```
+Phase A — Close the operational loop
+  ├── procurement-agent          REORDER_TRIGGERED → purchase order → goods received
+  ├── hr-payroll-agent           pg_cron monthly → payroll journal entries
+  └── bank feed ingest           reconcile GL vs actual bank transactions
+
+Phase B — Make it self-governing
+  ├── Predicate calculus evaluator   replace hardcoded triggers with JSONB rule engine
+  ├── Row-Level Security             all tables locked to service role per agent
+  └── Authorization log viewer       surface erp_authorization_logs in Operator Console
+
+Phase C — Make it self-correcting  (Layer 3)
+  ├── Episodic memory (pgvector)     agents remember past decisions and outcomes
+  ├── Anomaly detection              flag deviations from historical patterns
+  └── SOP self-amendment             agents propose SOP updates; human approves
+
+Phase D — Ship it
+  ├── Vercel production deploy       env vars, custom domain, rate limiting
+  ├── Realtime Console               Supabase Realtime subscriptions replace ISR
+  └── Multi-tenant                   schema-per-company isolation
+```
+
+---
+
+### The Provocative Claim
+
+Most ERP software is a **recording system** — it captures what humans decided. This system is an **execution system** — it decides and acts, and records why.
+
+The MVAC thesis is that for a large class of SME operations — commodity trading, distribution, light manufacturing — the full order-to-cash and procure-to-pay cycles can run **with zero human keystrokes** under normal conditions, and the human role shifts entirely to:
+
+1. Setting policy (SOPs in the database)
+2. Approving exceptions (Telegram alerts)
+3. Reviewing the audit log (not the inbox)
+
+When all five criteria above are met, this project becomes that company.
+
+---
+
+*Last updated: 2026-03-01*
