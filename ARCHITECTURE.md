@@ -599,12 +599,13 @@ No architectural change required — this is purely a frontend concern.
 | Refrigeration trigger | ✅ Live | Blocks cold-chain misrouting |
 | Double-entry balance trigger | ✅ Live | Σ(DR) = Σ(CR) enforced per transaction |
 | Order confirmation cascade | ✅ Live | Inventory deduction + INVOICE_CUSTOMER event on confirm |
-| `sales-agent` v3 | ✅ Live | ~1s order confirmation, tier discounts, credit checks |
+| `sales-agent` v4 | ✅ Live | ~1s order confirmation, tier discounts, credit checks, market intelligence validation |
 | `concierge-bot` | ✅ Live | Claude Opus 4.6 agentic loop, Telegram webhook |
 | `inbound-order` | ✅ Live | Order intake from all channels |
 | Operator Console | ✅ Live | 7 pages, ISR polling |
 | Customer Portal | ✅ Live | Public order form with live product catalogue |
-| `finance-agent` | 🔜 Next | `INVOICE_CUSTOMER` queue is filling |
+| `finance-agent` | ✅ Live | Double-entry invoicing, high-value approval gate (>€10k), Telegram operator alert |
+| Skill Injection Loop (Layer 2) | ✅ Live | SOPs loaded from `erp_agent_skills` at runtime for all active agents |
 | Predicate calculus evaluator | 🔜 Planned | Replace hardcoded triggers with JSONB rule engine |
 | `procurement-agent` | 🔜 Planned | `REORDER_TRIGGERED` events queued |
 | `hr-payroll-agent` | 🔜 Planned | Schema complete, pg_cron schedule ready |
