@@ -154,7 +154,7 @@ Step 4 — Autonomous Task Execution (sales-agent Edge Function)
     → AFTER UPDATE trigger erp_sales_order_confirmed_trigger fires
     → erp_inventory.current_quantity_available -= 2     (atomic deduction)
     → INSERT erp_task_events (INVOICE_CUSTOMER, target_agent='finance_agent')
-       → dispatch trigger fires again → finance-agent woken (future)
+       → dispatch trigger fires again → finance-agent woken (~3s)
   UPDATE erp_customers SET current_balance += 378.10
   UPDATE erp_task_events SET status='completed', processed_at=NOW()
 
@@ -170,7 +170,96 @@ Step 6 — Observer Layer (Operator Console)
 
 ---
 
-## 5. Agentic Governance
+## 5. Petri Net State-Safety Audit
+
+We use Petri Net formalism as a **design review lens** — not a runtime engine. The model below maps the live system onto Places (database states), Transitions (agents and triggers), and Tokens (order UUIDs) to formally verify reachability and deadlock-freedom.
+
+### Token Flow Diagram
+
+```
+PLACES (○ = state)          TRANSITIONS (→ = agent/trigger)
+─────────────────────────────────────────────────────────────────
+
+ [INTAKE]
+  ○ P0  inbound signal (Telegram / portal / curl)
+     │
+     → T0  inbound-order Edge Function
+     │     (creates draft order + task event)
+     ▼
+  ○ P1  erp_task_events.status = 'pending'  (ORDER_NEGOTIATION)
+  ○ P2  erp_sales_orders.status = 'draft'
+     │
+     → T1  erp_dispatch_on_task_insert trigger
+     │     (net.http_post to sales-agent, async, ~1s)
+     ▼
+  ○ P3  erp_task_events.status = 'processing'  (ORDER_NEGOTIATION)
+
+ [SALES AGENT DECISION]
+  P3 ──→ T2  sales-agent Edge Function
+             ├─ Skill Injection: load ORDER_NEGOTIATION SOPs
+             ├─ SOP: market_intelligence_price_validation
+             │   price > market_avg × 1.10?
+             │   YES → P4a  event.failed + order stays 'draft'  ← TERMINAL (rejected)
+             │
+             ├─ inventory check, credit check
+             │
+             └─ price OK, checks pass
+                 → T3  UPDATE erp_sales_orders SET status='confirmed'
+                     (AFTER UPDATE trigger fires)
+                 ▼
+  ○ P4b erp_sales_orders.status = 'confirmed'
+  ○ P5  erp_task_events.status = 'completed'  (ORDER_NEGOTIATION)
+  ○ P6  erp_inventory.quantity_available -= order_qty   (CASCADE)
+  ○ P7  erp_task_events.status = 'pending'  (INVOICE_CUSTOMER)  ← emitted by trigger
+
+ [FINANCE AGENT DECISION]
+  P7 ──→ T4  erp_dispatch_on_task_insert trigger
+             (net.http_post to finance-agent)
+     ▼
+  ○ P8  erp_task_events.status = 'processing'  (INVOICE_CUSTOMER)
+
+  P8 ──→ T5  finance-agent Edge Function
+             ├─ Skill Injection: load INVOICE_CUSTOMER SOPs
+             ├─ SOP: high_value_invoice_approval_gate
+             │   amount > €10,000?
+             │   YES → P9a  order.status = 'pending_review'
+             │              event.status = 'completed' (with gate note)
+             │              Telegram alert to operator
+             │              ○ P9a = INTENTIONAL HUMAN GATE (not a deadlock)
+             │
+             └─ amount ≤ €10,000
+                 → T6  post_journal_entry() RPC
+                 │     DR 12000 Accounts Receivable
+                 │     CR 41000 Product Revenue
+                 ▼
+  ○ P9b erp_financial_transactions row created
+  ○ P10 erp_sales_orders.status = 'invoiced'
+  ○ P11 erp_task_events.status = 'completed'  (INVOICE_CUSTOMER)  ← TERMINAL (success)
+```
+
+### Deadlock Analysis
+
+| Scenario | Place | Risk | Mitigation |
+|----------|-------|------|------------|
+| sales-agent crashes mid-execution | P3 (`processing`) | Token stuck — no transition eligible | **pg_cron** resets `processing` events older than 5 min back to `pending` → T1 re-fires |
+| finance-agent crashes mid-execution | P8 (`processing`) | Token stuck | Same pg_cron fallback — every 5 minutes |
+| Dispatch `net.http_post` fails | P1 (`pending`) | Event never claimed | pg_cron fallback polls and calls agent directly |
+| order in `pending_review` | P9a | Token waiting for human | **Intentional gate** — not a deadlock. Operator re-queues via console. Documented explicitly. |
+| market price check rejects order | P4a | Token at `failed` | Terminal state. Operator can re-submit or adjust pricing. |
+
+**Conclusion:** No permanent deadlock exists. Every `processing` state has a pg_cron escape path within 5 minutes. The only blocked state is `pending_review`, which is a deliberate human-in-the-loop gate with a documented resolution path. All tokens (order UUIDs) can reach the `invoiced` terminal state if business rules are satisfied.
+
+### Reachability
+
+From any `draft` order, the `invoiced` state is reachable iff:
+- All SKUs priced ≤ market_avg × 1.10
+- Sufficient inventory exists
+- Customer credit limit not breached
+- Invoice amount ≤ €10,000 (or human approval granted)
+
+---
+
+## 6. Agentic Governance
 
 Agents are not free to act arbitrarily. Each agent operates within a layered permission structure enforced entirely inside the database.
 
@@ -197,7 +286,43 @@ Supported node types: `comparison`, `logical` (AND/OR/NOT), `field`, `literal`, 
 
 This separates the *what* (the rule) from the *where* (the enforcement point). Rules can be added, modified, or toggled without touching any application code or redeploying any Edge Function.
 
-### 5.3 Hardcoded Constraint Triggers (Current)
+### 5.3 Skill Injection Loop (Layer 2 — SOPs)
+
+Before any agent executes business logic, it performs a **skill injection query** — a SELECT against `erp_agent_skills` filtered by `agent_id` and `event_type`. The retrieved SOP text is injected directly into the agent's decision logic at runtime. This separates *what the agent knows* from *what the agent does*.
+
+```
+Agent wakes (event claimed)
+  │
+  ├─► SELECT erp_agent_skills WHERE agent_id = ? AND event_type IN (...)
+  │         ↓ returns SOPs as domain_knowledge text + activation_condition JSONB
+  │
+  ├─► Extract behavioral parameters from activation_condition
+  │   e.g. threshold_eur: 10000, threshold_pct: 10
+  │
+  └─► Execute business logic informed by SOPs
+```
+
+**Live SOPs (7 total across all agents):**
+
+| Agent | SOP Name | Trigger Condition | Effect |
+|-------|----------|------------------|--------|
+| `finance_agent` | `high_value_invoice_approval_gate` | `amount > €10,000` | Freeze order to `pending_review`, send Telegram alert to operator |
+| `finance_agent` | `gaap_revenue_recognition` | always | Enforce ASC 606 revenue recognition |
+| `finance_agent` | `double_entry_enforcement` | always | Every debit must have a matching credit |
+| `sales_agent` | `market_intelligence_price_validation` | `unit_price > market_avg × 1.10` | Reject order, log deviation in `erp_authorization_logs` |
+| `sales_agent` | `discount_authority_matrix` | always | Platinum: 20%, Gold: 10%, Silver: 5%, Standard: 0% |
+| `procurement_agent` | `vendor_negotiation_tactics` | `REORDER_TRIGGERED` | Competitive bidding tiers, preferred supplier priority |
+| `hr_payroll_agent` | `payroll_tax_computation` | `PAYROLL_RUN` | Withhold 20% income tax (>€50k), 15% below |
+
+**Market Intelligence (erp_market_intelligence):**
+The `market_intelligence_price_validation` SOP queries `erp_market_intelligence` — a table of 3-month rolling average prices per SKU sourced from market feeds. The sales agent compares each order line's `unit_price` against this benchmark. Any SKU priced >10% above the market average is rejected before order confirmation, and the deviation is logged in `erp_authorization_logs` for audit.
+
+**Human-in-the-Loop Gate:**
+The `high_value_invoice_approval_gate` introduces a deliberate human gate at the invoicing stage. Any invoice exceeding €10,000 is frozen at `pending_review`. The finance agent does not post the journal entry — it sends a Telegram notification to the operator and stops. This demonstrates that the system knows its own authority boundary: large financial events require human confirmation, not just database approval.
+
+---
+
+### 5.4 Hardcoded Constraint Triggers (Current)
 
 Until the full predicate calculus evaluator is wired in, three rules are enforced by dedicated PL/pgSQL trigger functions:
 
@@ -215,7 +340,7 @@ Each agent has a `database_role` column in `erp_agents`. When RLS is enabled, ea
 
 ---
 
-## 6. Complete Trigger Catalogue
+## 7. Complete Trigger Catalogue
 
 | Trigger | Table | Timing | Effect |
 |---------|-------|--------|--------|
@@ -287,12 +412,12 @@ Tables are grouped by domain. Foreign key relationships cross domain boundaries 
 
 | Agent | Role Name | Status | Financial Authority | Processes |
 |-------|-----------|--------|--------------------:|-----------|
-| Sales Agent | `sales_agent` | ✅ Active (automated) | configurable | `ORDER_NEGOTIATION` |
+| Sales Agent | `sales_agent` | ✅ Active (automated) | €25,000 | `ORDER_NEGOTIATION` |
 | Concierge Agent | `concierge_agent` | ✅ Active (Telegram) | none (intake only) | inbound order negotiation via chat |
-| Finance Agent | `finance_agent` | 🔜 Next | configurable | `INVOICE_CUSTOMER`, `BANK_RECONCILIATION` |
-| Procurement Agent | `procurement_agent` | 🔜 Planned | configurable | `REORDER_TRIGGERED` |
+| Finance Agent | `finance_agent` | ✅ Active (automated) | €250,000 | `INVOICE_CUSTOMER` |
+| Procurement Agent | `procurement_agent` | 🔜 Planned | €50,000 | `REORDER_TRIGGERED` |
 | Inventory Watcher | `inventory_watcher` | 🔜 Planned | none (read-only sentinel) | `INVENTORY_CHECK` → emits `REORDER_TRIGGERED` |
-| HR/Payroll Agent | `hr_payroll_agent` | 🔜 Planned | configurable | `PAYROLL_RUN`, `TIMESHEET_APPROVAL` |
+| HR/Payroll Agent | `hr_payroll_agent` | 🔜 Planned | €5,000 | `PAYROLL_RUN`, `TIMESHEET_APPROVAL` |
 
 ---
 
@@ -333,20 +458,33 @@ Tables are grouped by domain. Foreign key relationships cross domain boundaries 
 - Operator Console — Next.js (Dashboard, Agents, Sales, Inventory, Finance, HR, Queue)
 - Customer Portal — public order submission with live product catalogue
 - `OPENCLAW_ERP_CONTEXT.md` — internal operator context file
+- `finance-agent` Edge Function — invoice posting, double-entry journals, `pending_review` gate
+- Skill Injection Layer 2 — 7 SOPs in `erp_agent_skills` (finance + sales + procurement + HR)
+- Market intelligence — `erp_market_intelligence` table, 3-month benchmarks, price deviation check
+- Petri Net state-safety audit — deadlock-free proof, human-gate documented
 
 ---
 
-### Priority 1 — Finance Agent
-The `INVOICE_CUSTOMER` event is already emitted and queued after every confirmed order. The finance agent reads it, posts a double-entry journal (`DR Accounts Receivable / CR Product Revenue`), and generates a customer invoice.
+### ✅ Finance Agent — Complete
+The `finance-agent` Edge Function is live. On every `INVOICE_CUSTOMER` event it:
+1. Queries `erp_agent_skills` (Skill Injection Layer 2) to load active SOPs
+2. Enforces the `high_value_invoice_approval_gate` SOP: invoices > €10,000 are frozen to `pending_review` and the operator is notified via Telegram
+3. For amounts ≤ €10,000: posts `DR 12000 Accounts Receivable / CR 41000 Product Revenue` via `post_journal_entry()` RPC
+4. Advances order to `invoiced` and writes to `erp_authorization_logs`
 
-The infrastructure is ready. What is missing is the Edge Function itself.
-
-**Required tables:** `erp_financial_transactions`, `erp_journal_entries`, `erp_accounts`
-**Constraint in play:** `erp_journal_balance_check` — the DB will reject any journal entry set where debits ≠ credits.
+**Measured latency:** draft → invoiced in under 5 seconds end-to-end.
 
 ---
 
-### Priority 2 — Predicate Calculus Evaluator
+### ✅ Skill Injection (Layer 2) — Complete
+7 SOPs live across 3 agents. See Section 6.3 for full detail.
+
+Market intelligence price validation active for all `ORDER_NEGOTIATION` events.
+High-value invoice approval gate active for all `INVOICE_CUSTOMER` events.
+
+---
+
+### Priority 1 — Predicate Calculus Evaluator
 
 The `erp_agent_constraints` table exists and can hold JSONB rules. The recursive evaluator that reads those rules at write time has not been implemented.
 

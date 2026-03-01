@@ -13,16 +13,28 @@ interface InvoiceEvent {
   };
 }
 
+interface AgentSkill {
+  skill_name: string;
+  domain_knowledge: string;
+  activation_condition: {
+    event_types?: string[];
+    always?: boolean;
+    threshold_eur?: number;
+    action?: string;
+    notify_channel?: string;
+  };
+}
+
 interface ProcessResult {
   event_id: string;
   sales_order_id: string;
-  status: "invoiced" | "failed" | "skipped";
+  status: "invoiced" | "failed" | "skipped" | "pending_review";
   reason?: string;
   transaction_id?: string;
   amount?: number;
 }
 
-// ── Extract error message from unknown catch value ────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function extractMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -30,6 +42,22 @@ function extractMessage(err: unknown): string {
     return String((err as { message: unknown }).message);
   }
   return JSON.stringify(err);
+}
+
+async function sendTelegramAlert(
+  botToken: string,
+  chatId: string,
+  text: string
+): Promise<void> {
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  } catch (err) {
+    console.error("Telegram alert failed:", extractMessage(err));
+  }
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -48,7 +76,7 @@ Deno.serve(async (req: Request) => {
   const errors: string[] = [];
 
   try {
-    // ── 1. Resolve the finance agent's UUID ───────────────────────────────────
+    // ── 1. Resolve finance agent UUID ─────────────────────────────────────────
     const { data: agent, error: agentError } = await supabase
       .from("erp_agents")
       .select("agent_id, financial_authority_limit")
@@ -59,7 +87,32 @@ Deno.serve(async (req: Request) => {
       throw new Error("finance_agent not found in erp_agents");
     }
 
-    // ── 2. Claim pending INVOICE_CUSTOMER events ──────────────────────────────
+    // ── 2. Skill Injection — load INVOICE_CUSTOMER SOPs ───────────────────────
+    // Layer 2 of the Cognition Loop: query erp_agent_skills before any action.
+    // Skills are injected into the agent's decision logic at runtime.
+    const { data: skillRows } = await supabase
+      .from("erp_agent_skills")
+      .select("skill_name, domain_knowledge, activation_condition")
+      .eq("agent_id", agent.agent_id);
+
+    const skills: AgentSkill[] = (skillRows ?? []).filter((s: AgentSkill) => {
+      const cond = s.activation_condition;
+      return cond?.event_types?.includes("INVOICE_CUSTOMER") || cond?.always;
+    });
+
+    // Extract approval threshold from the high_value_invoice_approval_gate SOP
+    const approvalSkill = skills.find(
+      (s) => s.skill_name === "high_value_invoice_approval_gate"
+    );
+    const approvalThreshold =
+      approvalSkill?.activation_condition?.threshold_eur ?? Infinity;
+
+    console.log(
+      `[SOP] Loaded ${skills.length} INVOICE_CUSTOMER skill(s).`,
+      `High-value approval threshold: €${approvalThreshold}`
+    );
+
+    // ── 3. Claim pending INVOICE_CUSTOMER events ──────────────────────────────
     const { data: events, error: fetchError } = await supabase
       .from("erp_task_events")
       .select("event_id, payload")
@@ -85,9 +138,14 @@ Deno.serve(async (req: Request) => {
       .update({ status: "processing" })
       .in("event_id", eventIds);
 
-    // ── 3. Process each event ─────────────────────────────────────────────────
+    // ── 4. Process each event ─────────────────────────────────────────────────
     for (const event of events as InvoiceEvent[]) {
-      const result = await processInvoiceEvent(supabase, agent.agent_id, event);
+      const result = await processInvoiceEvent(
+        supabase,
+        agent.agent_id,
+        event,
+        approvalThreshold
+      );
       results.push(result);
 
       if (result.status === "invoiced") {
@@ -95,6 +153,36 @@ Deno.serve(async (req: Request) => {
           .from("erp_task_events")
           .update({ status: "completed", processed_at: new Date().toISOString() })
           .eq("event_id", event.event_id);
+
+      } else if (result.status === "pending_review") {
+        // SOP gate triggered — event is resolved, order is frozen for human review.
+        await supabase
+          .from("erp_task_events")
+          .update({
+            status: "completed",
+            processed_at: new Date().toISOString(),
+            error_message: `SOP gate: €${result.amount?.toFixed(2)} exceeds €${approvalThreshold} threshold. Order frozen for manual review.`,
+          })
+          .eq("event_id", event.event_id);
+
+        // Notify the operator via Telegram
+        const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
+        const operatorChatId = Deno.env.get("OPERATOR_TELEGRAM_CHAT_ID");
+        if (botToken && operatorChatId) {
+          await sendTelegramAlert(
+            botToken,
+            operatorChatId,
+            `🔔 INVOICE APPROVAL REQUIRED\n\n` +
+            `Order: ${event.payload.sales_order_id.slice(0, 8).toUpperCase()}\n` +
+            `Amount: €${result.amount?.toFixed(2)}\n\n` +
+            `This invoice exceeds the €${approvalThreshold.toLocaleString()} ` +
+            `automatic approval threshold (SOP: high_value_invoice_approval_gate).\n\n` +
+            `Review in the operator console and re-queue to proceed.`
+          );
+        } else {
+          console.warn("[SOP] OPERATOR_TELEGRAM_CHAT_ID not set — Telegram alert skipped.");
+        }
+
       } else if (result.status === "failed") {
         await supabase
           .from("erp_task_events")
@@ -105,6 +193,7 @@ Deno.serve(async (req: Request) => {
           })
           .eq("event_id", event.event_id);
         errors.push(`${event.event_id}: ${result.reason}`);
+
       } else {
         // skipped — release back to queue
         await supabase
@@ -115,6 +204,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const invoiced = results.filter((r) => r.status === "invoiced").length;
+    const frozen = results.filter((r) => r.status === "pending_review").length;
     const failed = results.filter((r) => r.status === "failed").length;
 
     return new Response(
@@ -122,12 +212,14 @@ Deno.serve(async (req: Request) => {
         success: true,
         processed: events.length,
         invoiced,
+        frozen_for_review: frozen,
         failed,
         results,
         errors: errors.length > 0 ? errors : undefined,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
+
   } catch (err: unknown) {
     const message = extractMessage(err);
     console.error("finance-agent error:", message);
@@ -143,7 +235,8 @@ Deno.serve(async (req: Request) => {
 async function processInvoiceEvent(
   supabase: ReturnType<typeof createClient>,
   agentId: string,
-  event: InvoiceEvent
+  event: InvoiceEvent,
+  approvalThreshold: number
 ): Promise<ProcessResult> {
   const { sales_order_id, amount, currency } = event.payload;
 
@@ -156,30 +249,50 @@ async function processInvoiceEvent(
       .single();
 
     if (orderError || !order) {
-      return {
-        event_id: event.event_id,
-        sales_order_id,
-        status: "failed",
-        reason: "Sales order not found",
-      };
+      return { event_id: event.event_id, sales_order_id, status: "failed", reason: "Sales order not found" };
     }
 
     if (order.order_status !== "confirmed") {
-      return {
-        event_id: event.event_id,
-        sales_order_id,
-        status: "skipped",
-        reason: `Order in unexpected status: ${order.order_status}`,
-      };
+      return { event_id: event.event_id, sales_order_id, status: "skipped", reason: `Order in unexpected status: ${order.order_status}` };
     }
 
     const invoiceAmount = Number(order.total_invoice_value) || amount;
-    const invoiceCurrency = order.currency_code || currency || "USD";
+    const invoiceCurrency = order.currency_code || currency || "EUR";
 
-    // ── B. Post double-entry journal via post_journal_entry() RPC ─────────────
-    //   DR 12000  Accounts Receivable   = invoiceAmount  (asset increases)
-    //   CR 41000  Product Revenue       = invoiceAmount  (revenue increases)
-    // The deferrable balance-check trigger validates at transaction COMMIT.
+    // ── B. SOP: high_value_invoice_approval_gate ──────────────────────────────
+    // "Indien de factuurwaarde > €10.000 is, bevries de status op 'pending_review'
+    //  en stuur een notificatie naar de operateur voor handmatige goedkeuring."
+    if (invoiceAmount > approvalThreshold) {
+      console.log(
+        `[SOP TRIGGERED] high_value_invoice_approval_gate:`,
+        `€${invoiceAmount} > €${approvalThreshold}. Freezing order to pending_review.`
+      );
+
+      const { error: freezeError } = await supabase
+        .from("erp_sales_orders")
+        .update({ order_status: "pending_review" })
+        .eq("sales_order_id", sales_order_id)
+        .eq("order_status", "confirmed");
+
+      if (freezeError) {
+        return { event_id: event.event_id, sales_order_id, status: "failed", reason: `Freeze failed: ${extractMessage(freezeError)}` };
+      }
+
+      await supabase.from("erp_authorization_logs").insert({
+        target_record_id: sales_order_id,
+        target_table: "erp_sales_orders",
+        authorizing_agent: agentId,
+        authorizing_role: "finance_agent",
+        reason: `SOP 'high_value_invoice_approval_gate': amount ${invoiceCurrency} ${invoiceAmount.toFixed(2)} ` +
+                `exceeds €${approvalThreshold} threshold. Order frozen to pending_review. Human approval required.`,
+      });
+
+      return { event_id: event.event_id, sales_order_id, status: "pending_review", amount: invoiceAmount };
+    }
+
+    // ── C. Post double-entry journal via post_journal_entry() RPC ─────────────
+    //   DR 12000  Accounts Receivable   = invoiceAmount
+    //   CR 41000  Product Revenue       = invoiceAmount
     const { data: txId, error: journalError } = await supabase.rpc(
       "post_journal_entry",
       {
@@ -206,31 +319,21 @@ async function processInvoiceEvent(
     );
 
     if (journalError) {
-      return {
-        event_id: event.event_id,
-        sales_order_id,
-        status: "failed",
-        reason: `Journal post failed: ${extractMessage(journalError)}`,
-      };
+      return { event_id: event.event_id, sales_order_id, status: "failed", reason: `Journal post failed: ${extractMessage(journalError)}` };
     }
 
-    // ── C. Advance sales order: confirmed → invoiced ──────────────────────────
+    // ── D. Advance sales order: confirmed → invoiced ──────────────────────────
     const { error: updateError } = await supabase
       .from("erp_sales_orders")
       .update({ order_status: "invoiced" })
       .eq("sales_order_id", sales_order_id)
-      .eq("order_status", "confirmed"); // safety: only advance if still confirmed
+      .eq("order_status", "confirmed");
 
     if (updateError) {
-      return {
-        event_id: event.event_id,
-        sales_order_id,
-        status: "failed",
-        reason: `Order status update failed: ${extractMessage(updateError)}`,
-      };
+      return { event_id: event.event_id, sales_order_id, status: "failed", reason: `Status update failed: ${extractMessage(updateError)}` };
     }
 
-    // ── D. Write to authorization log ─────────────────────────────────────────
+    // ── E. Write to authorization log ─────────────────────────────────────────
     await supabase.from("erp_authorization_logs").insert({
       target_record_id: sales_order_id,
       target_table: "erp_sales_orders",
@@ -240,24 +343,14 @@ async function processInvoiceEvent(
     });
 
     console.log(
-      `Invoiced order ${sales_order_id}`,
+      `[OK] Invoiced ${sales_order_id}`,
       `| ${invoiceCurrency} ${invoiceAmount}`,
       `| journal tx: ${txId}`
     );
 
-    return {
-      event_id: event.event_id,
-      sales_order_id,
-      status: "invoiced",
-      transaction_id: txId,
-      amount: invoiceAmount,
-    };
+    return { event_id: event.event_id, sales_order_id, status: "invoiced", transaction_id: txId, amount: invoiceAmount };
+
   } catch (err: unknown) {
-    return {
-      event_id: event.event_id,
-      sales_order_id,
-      status: "failed",
-      reason: extractMessage(err),
-    };
+    return { event_id: event.event_id, sales_order_id, status: "failed", reason: extractMessage(err) };
   }
 }
