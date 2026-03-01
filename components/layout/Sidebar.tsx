@@ -10,6 +10,7 @@ import {
   ShoppingCart,
   Users,
   ListOrdered,
+  ShieldCheck,
   Cpu,
   Circle,
   ExternalLink,
@@ -23,6 +24,7 @@ const NAV = [
   { href: '/sales',     label: 'Sales',      icon: ShoppingCart,    color: '#3b82f6' },
   { href: '/hr',        label: 'HR',         icon: Users,           color: '#a855f7' },
   { href: '/queue',     label: 'Queue',      icon: ListOrdered,     color: '#ef4444' },
+  { href: '/rules',     label: 'Rules',      icon: ShieldCheck,     color: '#ef4444' },
 ]
 
 export function Sidebar() {
