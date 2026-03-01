@@ -72,6 +72,7 @@ This is a working system, not a prototype. The following is live on Supabase:
 - **Customer Portal** — public order submission form with live product catalogue
 - **Telegram Bot** (Concierge Agent) — Claude Opus 4.6 powered chatbot for customers to place orders conversationally
 - **OpenClaw** — local AI assistant with direct Supabase access for internal operators
+- **Predicate Playground** (`/rules`) — live JSONB AST editor + NL→predicate compiler powered by Claude
 
 ### Order Pipeline (live end-to-end, ~1 second)
 ```
@@ -157,14 +158,24 @@ curl -X POST "https://api.telegram.org/botYOUR_TOKEN/setWebhook" \
   -d '{"url": "https://YOUR_PROJECT_ID.supabase.co/functions/v1/concierge-bot"}'
 ```
 
-### Step 7 — Start the operator console
+### Step 7 — Configure the Operator Console
+
+Create a `.env.local` file in the project root:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_ID.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+ANTHROPIC_API_KEY=sk-ant-...        # required for /rules NL→predicate compiler
+```
+
+Then install and start:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — you'll see live dashboards for queue, sales, inventory, finance, and HR.
+Open [http://localhost:3000](http://localhost:3000) — live dashboards for queue, sales, inventory, finance, HR, and the predicate playground at [http://localhost:3000/rules](http://localhost:3000/rules).
 
 ### Step 8 — Smoke test
 
@@ -190,7 +201,9 @@ See [`TELEGRAM_TESTING.md`](./TELEGRAM_TESTING.md) for the full test script with
 - [x] Customer portal (public order form)
 - [x] OpenClaw integration context
 - [x] Finance agent (invoicing, double-entry journal posting, ~4s end-to-end)
-- [ ] Predicate calculus evaluator (replace hardcoded triggers with JSONB AST engine)
+- [x] Skill Injection Loop — Layer 2 (SOPs loaded from DB at agent runtime)
+- [x] Predicate Playground (`/rules`) — live AST editor, evaluator, NL→predicate compiler (Claude)
+- [ ] Predicate evaluator — agent integration (wire evaluator into pipeline, migrate 15 hardcoded rules)
 - [ ] Procurement agent (auto purchase orders on low stock)
 - [ ] Inventory watcher (scheduled stock audits)
 - [ ] HR/Payroll agent (payroll runs, timesheet approval)

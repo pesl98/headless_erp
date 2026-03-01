@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { ShieldCheck, ShieldX, AlertTriangle, ChevronRight, Play, RotateCcw, Database, BookOpen } from 'lucide-react'
+import { ShieldCheck, ShieldX, AlertTriangle, ChevronRight, Play, RotateCcw, Database, BookOpen, MessageSquare, ChevronDown } from 'lucide-react'
 import {
   type ASTNode,
   type EvaluationContext,
@@ -10,6 +10,7 @@ import {
   evaluateRuleFromJSON,
   renderAST,
 } from '@/lib/predicate-evaluator'
+import { PredicateChat } from './PredicateChat'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -270,6 +271,7 @@ export function PredicatePlayground({ skills, constraints }: Props) {
   )
   const [result, setResult] = useState<EvalResult | null>(null)
   const [activePreset, setActivePreset] = useState<string>(PREBUILT[0].name)
+  const [chatOpen, setChatOpen] = useState(true)
 
   const evaluate = useCallback(() => {
     const r = evaluateRuleFromJSON(astText, context)
@@ -293,6 +295,13 @@ export function PredicatePlayground({ skills, constraints }: Props) {
     setAstText(JSON.stringify(skill.activation_condition, null, 2))
   }
 
+  function handleChatAST(ast: ASTNode, astText: string) {
+    setActivePreset('chat')
+    setAstText(astText)
+    // Scroll to top so user sees the editor update
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   // derive human-readable summary
   let summary = ''
   try {
@@ -307,6 +316,7 @@ export function PredicatePlayground({ skills, constraints }: Props) {
   const hasError = !!result?.error
 
   return (
+    <>
     <div
       className="anim-fade-up anim-delay-1"
       style={{
@@ -664,7 +674,7 @@ export function PredicatePlayground({ skills, constraints }: Props) {
         </div>
       </div>
 
-      {/* ── Right: Context + Result ───────────────────────────────── */}
+      {/* ── Right: Context + Result ───────────────────────────────────────── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* Result badge */}
         <div className="erp-card">
@@ -839,6 +849,64 @@ export function PredicatePlayground({ skills, constraints }: Props) {
         )}
       </div>
     </div>
+
+    {/* ── Chat panel ───────────────────────────────────────────────── */}
+    <div className="anim-fade-up anim-delay-2" style={{ marginTop: 16 }}>
+      {/* Collapsible header */}
+      <button
+        onClick={() => setChatOpen((o) => !o)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          width: '100%',
+          background: 'transparent',
+          border: 'none',
+          borderBottom: chatOpen ? 'none' : '1px solid var(--border-dim)',
+          padding: '10px 0',
+          cursor: 'pointer',
+          marginBottom: chatOpen ? 10 : 0,
+        }}
+      >
+        <MessageSquare size={13} color="#a855f7" />
+        <span
+          style={{
+            fontFamily: 'var(--font-ibm-mono, monospace)',
+            fontSize: '0.72rem',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            color: 'var(--txt-secondary)',
+          }}
+        >
+          NATURAL LANGUAGE COMPILER
+        </span>
+        <span
+          style={{
+            marginLeft: 8,
+            fontFamily: 'var(--font-ibm-mono, monospace)',
+            fontSize: '0.6rem',
+            color: '#a855f7',
+            background: 'rgba(168,85,247,0.1)',
+            padding: '2px 8px',
+            borderRadius: 10,
+          }}
+        >
+          AI · claude-opus-4-5
+        </span>
+        <ChevronDown
+          size={14}
+          color="var(--txt-muted)"
+          style={{
+            marginLeft: 'auto',
+            transform: chatOpen ? 'none' : 'rotate(-90deg)',
+            transition: 'transform 0.2s',
+          }}
+        />
+      </button>
+
+      {chatOpen && <PredicateChat onASTGenerated={handleChatAST} />}
+    </div>
+    </>
   )
 }
 

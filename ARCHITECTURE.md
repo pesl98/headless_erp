@@ -334,7 +334,55 @@ Until the full predicate calculus evaluator is wired in, three rules are enforce
 
 These are the current enforcement surface. The predicate calculus engine will subsume them.
 
-### 5.4 Row-Level Security
+### 5.4 Predicate Calculus Evaluator (Phase B)
+
+The predicate calculus evaluator is the **data-driven rule engine** that will eventually replace every hardcoded `if` statement in every agent. Rules are stored as JSON ASTs in `erp_agent_constraints.logic_ast` and evaluated at runtime by a pure TypeScript engine (`lib/predicate-evaluator.ts`).
+
+#### Grammar (6 node types, fully composable)
+
+```
+const       { "type": "const",      "value": number|string|boolean }
+field       { "type": "field",      "name": "<context_field>" }
+arithmetic  { "type": "arithmetic", "op": "+"|"-"|"*"|"/",         "left": node, "right": node }
+comparison  { "type": "comparison", "op": ">"|"<"|">="|"<="|"eq"|"ne", "left": node, "right": node }
+logical-2   { "type": "logical",    "op": "and"|"or",              "left": node, "right": node }
+logical-1   { "type": "logical",    "op": "not",                   "left": node }
+```
+
+#### Example: Market price validation (currently hardcoded in sales-agent)
+```json
+{
+  "type": "comparison", "op": ">",
+  "left": { "type": "field", "name": "unit_price" },
+  "right": {
+    "type": "arithmetic", "op": "*",
+    "left":  { "type": "field", "name": "market_avg" },
+    "right": { "type": "const", "value": 1.10 }
+  }
+}
+```
+
+#### Natural Language Compiler
+
+The `/rules` page includes a **Claude-powered NL→AST compiler** (`/api/predicate-compiler`). An operator types a business rule in plain English:
+
+> *"reject orders where the unit price is more than 10% above market average"*
+
+Claude compiles it to the JSON AST above. Multi-turn: saying *"also for platinum customers only"* composes a logical AND with the previous predicate. The compiled AST is injected directly into the editor and evaluated live.
+
+**Model:** `claude-opus-4-5` with a strict grammar-only system prompt. Field hallucinations are rejected (allowed field list is part of the system prompt).
+
+#### Roadmap to full agent integration
+
+1. ✅ `lib/predicate-evaluator.ts` — pure TS evaluator, zero dependencies
+2. ✅ `/rules` playground — live editor + NL compiler
+3. 🔜 `evaluate_agent_constraints(agent_id, context)` — PL/pgSQL function that reads `erp_agent_constraints.logic_ast` and calls the evaluator
+4. 🔜 Migrate 15 hardcoded rules → JSONB rows in `erp_agent_constraints`
+5. 🔜 Agents call the evaluator instead of inline `if` statements
+
+---
+
+### 5.5 Row-Level Security
 
 Each agent has a `database_role` column in `erp_agents`. When RLS is enabled, each role will be bound to the tables it legitimately needs. The `sales_agent` role cannot read payroll data. The `hr_payroll_agent` role cannot write to `erp_sales_orders`. These boundaries cannot be bypassed regardless of what the agent's LLM context instructs it to do.
 
@@ -606,7 +654,8 @@ No architectural change required — this is purely a frontend concern.
 | Customer Portal | ✅ Live | Public order form with live product catalogue |
 | `finance-agent` | ✅ Live | Double-entry invoicing, high-value approval gate (>€10k), Telegram operator alert |
 | Skill Injection Loop (Layer 2) | ✅ Live | SOPs loaded from `erp_agent_skills` at runtime for all active agents |
-| Predicate calculus evaluator | 🔜 Planned | Replace hardcoded triggers with JSONB rule engine |
+| Predicate calculus evaluator — Playground | ✅ Live | `/rules` page: AST editor, live evaluator, NL→predicate compiler (Claude) |
+| Predicate calculus evaluator — Agent integration | 🔜 Planned | Wire evaluator into agent pipeline; migrate hardcoded `if` statements to `erp_agent_constraints` JSONB |
 | `procurement-agent` | 🔜 Planned | `REORDER_TRIGGERED` events queued |
 | `hr-payroll-agent` | 🔜 Planned | Schema complete, pg_cron schedule ready |
 | Semantic memory (pgvector) | 🔜 Planned | Table exists, read/write pipeline not implemented |
@@ -652,7 +701,8 @@ Phase A — Close the operational loop
   └── bank feed ingest           reconcile GL vs actual bank transactions
 
 Phase B — Make it self-governing
-  ├── Predicate calculus evaluator   replace hardcoded triggers with JSONB rule engine
+  ├── Predicate calculus evaluator   ✅ Playground live (/rules) — NL→AST compiler + live evaluator
+  │   └── Next: wire evaluator into agent pipeline, migrate hardcoded rules to erp_agent_constraints
   ├── Row-Level Security             all tables locked to service role per agent
   └── Authorization log viewer       surface erp_authorization_logs in Operator Console
 
