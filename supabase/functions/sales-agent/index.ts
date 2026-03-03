@@ -119,15 +119,12 @@ Deno.serve(async (req: Request) => {
       `Market price deviation threshold: ${marketThresholdPct}%`
     );
 
-    // ── 3. Claim pending ORDER_NEGOTIATION events ─────────────────────────────
+    // ── 3. Atomically claim pending ORDER_NEGOTIATION events ─────────────────
+    // Uses claim_task_events() RPC which runs SELECT FOR UPDATE SKIP LOCKED
+    // inside a single UPDATE statement — concurrent agent invocations never
+    // claim the same event (fixes TOCTOU race condition).
     const { data: events, error: fetchError } = await supabase
-      .from("erp_task_events")
-      .select("event_id, payload")
-      .eq("event_type", "ORDER_NEGOTIATION")
-      .eq("status", "pending")
-      .order("priority", { ascending: false })
-      .order("created_at", { ascending: true })
-      .limit(20);
+      .rpc("claim_task_events", { p_event_type: "ORDER_NEGOTIATION", p_limit: 20 });
 
     if (fetchError) throw fetchError;
     if (!events || events.length === 0) {
@@ -136,13 +133,6 @@ Deno.serve(async (req: Request) => {
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
     }
-
-    // Mark all fetched events as 'processing' (optimistic lock)
-    const eventIds = events.map((e: TaskEvent) => e.event_id);
-    await supabase
-      .from("erp_task_events")
-      .update({ status: "processing" })
-      .in("event_id", eventIds);
 
     // ── 4. Pre-load market intelligence for all SKUs in this batch ────────────
     // Single query covers all events — avoids N+1 inside the loop.
@@ -352,7 +342,9 @@ async function processOrderEvent(
     // ── E. Confirm the order ──────────────────────────────────────────────────
     // The DB trigger erp_sales_order_confirmed_trigger fires on draft→confirmed:
     // deducts inventory quantities + emits INVOICE_CUSTOMER task event.
-    const { error: confirmError } = await supabase
+    // .select() is required so we can detect 0-rows-affected (another agent
+    // already confirmed this order) rather than silently treating it as success.
+    const { data: confirmData, error: confirmError } = await supabase
       .from("erp_sales_orders")
       .update({
         order_status: "confirmed",
@@ -360,18 +352,25 @@ async function processOrderEvent(
         total_invoice_value: finalValue,
       })
       .eq("sales_order_id", sales_order_id)
-      .eq("order_status", "draft");
+      .eq("order_status", "draft")
+      .select("sales_order_id");
 
     if (confirmError) {
       return { event_id: event.event_id, sales_order_id, status: "failed", reason: extractMessage(confirmError) };
     }
+    if (!confirmData || confirmData.length === 0) {
+      // Another concurrent agent already confirmed this order — skip cleanly.
+      return { event_id: event.event_id, sales_order_id, status: "skipped", reason: "Order already confirmed by another agent invocation" };
+    }
 
-    // ── F. Update customer balance ────────────────────────────────────────────
+    // ── F. Update customer balance (atomic server-side increment) ─────────────
+    // Uses increment_customer_balance() RPC to avoid a read-then-write lost-update
+    // when two agents process different orders for the same customer concurrently.
     if (customer) {
-      await supabase
-        .from("erp_customers")
-        .update({ current_balance: Number(customer.current_balance) + finalValue })
-        .eq("customer_id", customer_id);
+      await supabase.rpc("increment_customer_balance", {
+        p_customer_id: customer_id,
+        p_amount: finalValue,
+      });
     }
 
     // ── G. Authorization log ──────────────────────────────────────────────────

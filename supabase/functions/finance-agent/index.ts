@@ -112,15 +112,12 @@ Deno.serve(async (req: Request) => {
       `High-value approval threshold: €${approvalThreshold}`
     );
 
-    // ── 3. Claim pending INVOICE_CUSTOMER events ──────────────────────────────
+    // ── 3. Atomically claim pending INVOICE_CUSTOMER events ───────────────────
+    // Uses claim_task_events() RPC which runs SELECT FOR UPDATE SKIP LOCKED
+    // inside a single UPDATE statement — concurrent agent invocations never
+    // claim the same event (fixes TOCTOU race condition).
     const { data: events, error: fetchError } = await supabase
-      .from("erp_task_events")
-      .select("event_id, payload")
-      .eq("event_type", "INVOICE_CUSTOMER")
-      .eq("status", "pending")
-      .order("priority", { ascending: false })
-      .order("created_at", { ascending: true })
-      .limit(20);
+      .rpc("claim_task_events", { p_event_type: "INVOICE_CUSTOMER", p_limit: 20 });
 
     if (fetchError) throw fetchError;
 
@@ -130,13 +127,6 @@ Deno.serve(async (req: Request) => {
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
     }
-
-    // Optimistic lock — mark all fetched events as 'processing'
-    const eventIds = events.map((e: InvoiceEvent) => e.event_id);
-    await supabase
-      .from("erp_task_events")
-      .update({ status: "processing" })
-      .in("event_id", eventIds);
 
     // ── 4. Process each event ─────────────────────────────────────────────────
     for (const event of events as InvoiceEvent[]) {
@@ -268,14 +258,18 @@ async function processInvoiceEvent(
         `€${invoiceAmount} > €${approvalThreshold}. Freezing order to pending_review.`
       );
 
-      const { error: freezeError } = await supabase
+      const { data: freezeData, error: freezeError } = await supabase
         .from("erp_sales_orders")
         .update({ order_status: "pending_review" })
         .eq("sales_order_id", sales_order_id)
-        .eq("order_status", "confirmed");
+        .eq("order_status", "confirmed")
+        .select("sales_order_id");
 
       if (freezeError) {
         return { event_id: event.event_id, sales_order_id, status: "failed", reason: `Freeze failed: ${extractMessage(freezeError)}` };
+      }
+      if (!freezeData || freezeData.length === 0) {
+        return { event_id: event.event_id, sales_order_id, status: "skipped", reason: "Order already frozen or transitioned by another agent invocation" };
       }
 
       await supabase.from("erp_authorization_logs").insert({
@@ -323,14 +317,20 @@ async function processInvoiceEvent(
     }
 
     // ── D. Advance sales order: confirmed → invoiced ──────────────────────────
-    const { error: updateError } = await supabase
+    // .select() lets us detect 0-rows-affected — if another agent already
+    // advanced this order, we skip rather than silently double-logging success.
+    const { data: invoicedData, error: updateError } = await supabase
       .from("erp_sales_orders")
       .update({ order_status: "invoiced" })
       .eq("sales_order_id", sales_order_id)
-      .eq("order_status", "confirmed");
+      .eq("order_status", "confirmed")
+      .select("sales_order_id");
 
     if (updateError) {
       return { event_id: event.event_id, sales_order_id, status: "failed", reason: `Status update failed: ${extractMessage(updateError)}` };
+    }
+    if (!invoicedData || invoicedData.length === 0) {
+      return { event_id: event.event_id, sales_order_id, status: "skipped", reason: "Order already invoiced by another agent invocation" };
     }
 
     // ── E. Write to authorization log ─────────────────────────────────────────
